@@ -48,6 +48,7 @@ function result(): ScreeningResult {
         sourceReliability: "official",
         summary: "Madoff was sentenced to 150 years.",
         countedInScore: true,
+        riskLevel: "high",
       },
     ],
     coverage: {
@@ -57,6 +58,7 @@ function result(): ScreeningResult {
       executedQueries: ['"Bernard Madoff" fraud'],
       searchesUsed: 2,
       articlesReviewed: 17,
+      urlsReviewed: ["https://www.justice.gov/usao-sdny/pr/bernard-madoff-sentenced"],
       rejectedUrls: [],
       errors: [],
     },
@@ -124,6 +126,13 @@ describe("runLogEntry", () => {
     });
     expect(JSON.stringify(entry).toLowerCase()).not.toContain("madoff");
     expect(JSON.stringify(entry).toLowerCase()).not.toContain("bernard");
+  });
+
+  it("leaves out the URLs read, which carry the name in their path", () => {
+    const entry = runLogEntry(MADOFF, result(), KEY);
+
+    expect(entry).not.toHaveProperty("urlsReviewed");
+    expect(JSON.stringify(entry)).not.toContain("https://");
   });
 });
 

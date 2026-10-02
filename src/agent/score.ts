@@ -7,6 +7,7 @@ import type {
   Finding,
   RiskLevel,
   SourceReliability,
+  Status,
 } from "./types";
 
 export const RECENT_YEARS = 2;
@@ -28,6 +29,8 @@ const MODERATE_CATEGORIES: ReadonlySet<Category> = new Set([
   "controversy",
   "violence",
 ]);
+// A final decision against the person, by a court or by an administrative or regulatory body.
+const FINAL_DECISIONS: ReadonlySet<Status> = new Set(["conviction", "sanctioned"]);
 const RELIABLE_SOURCES: ReadonlySet<SourceReliability> = new Set(["official", "national_press"]);
 // Going over the search budget means the model wanted more searches, not that a planned one failed.
 const NON_BLOCKING_ERRORS: ReadonlySet<CoverageErrorCode> = new Set(["max_uses_exceeded"]);
@@ -57,10 +60,14 @@ export function score(
   coverageComplete: boolean,
   screenedAt: Date,
 ): Score {
-  const scored = findings.map((finding) => ({
-    finding: { ...finding, countedInScore: isCounted(finding) },
-    level: findingLevel(finding, screenedAt),
-  }));
+  const scored = findings.map((finding) => {
+    const level = findingLevel(finding, screenedAt);
+    const counted = isCounted(finding);
+    return {
+      finding: { ...finding, countedInScore: counted, riskLevel: counted ? level : null },
+      level,
+    };
+  });
   const counted = scored.filter(({ finding }) => finding.countedInScore);
 
   return {
@@ -76,6 +83,17 @@ export function score(
   };
 }
 
+// The answer reproduced the prompt canary: the model followed an instruction it read, so none of
+// its assessments can be relied on (D-36). The findings stay visible to the analyst, uncounted,
+// and the result reads like any blocking error: low risk at low confidence, incomplete.
+export function untrustedScore(findings: readonly AssessedFinding[]): Score {
+  return {
+    risk: "low",
+    confidence: "low",
+    findings: findings.map((finding) => ({ ...finding, countedInScore: false, riskLevel: null })),
+  };
+}
+
 export function findingLevel(finding: AssessedFinding, screenedAt: Date): RiskLevel {
   // Acquittals and old minor matters never weigh on the risk, whatever the modulators say.
   if (finding.status === "acquitted") return "low";
@@ -86,7 +104,9 @@ export function findingLevel(finding: AssessedFinding, screenedAt: Date): RiskLe
   const base = baseLevel(finding);
   const raised = modulatorCount(finding, screenedAt) >= MODULATORS_TO_RAISE ? next(base) : base;
   // Modulators make the facts more credible, not the identity: only a high identity reaches high.
-  return finding.identityConfidence === "high" ? raised : lower(raised, "medium");
+  // A matter of an organization the person leads does not establish their own part in it (D-34).
+  const personal = finding.identityConfidence === "high" && finding.subject !== "organization";
+  return personal ? raised : lower(raised, "medium");
 }
 
 export function isCorroborated(
@@ -98,12 +118,16 @@ export function isCorroborated(
 
 // Complete when every planned query ran and nothing failed: only then does an empty result mean
 // that nothing was found.
+// The user message lists each planned query after its language tag, "[pl] ...". The model
+// sometimes copies the tag into the query it runs; the search is the same (D-35).
+const LEADING_LANGUAGE_TAG = /^\[[a-z]{2}\]\s+/;
+
 export function isCoverageComplete(
   plannedQueries: readonly string[],
   executedQueries: readonly string[],
   errors: readonly CoverageError[],
 ): boolean {
-  const executed = new Set(executedQueries);
+  const executed = new Set(executedQueries.map((query) => query.replace(LEADING_LANGUAGE_TAG, "")));
   return (
     plannedQueries.every((query) => executed.has(query)) &&
     errors.every((error) => NON_BLOCKING_ERRORS.has(error.code))
@@ -132,13 +156,15 @@ function overallConfidence(
   return homonymInCriticalCategory ? "medium" : "high";
 }
 
+// In a critical category at high identity, an allegation alone starts at medium and needs two
+// modulators to reach high; any official step, from investigation to final decision, is high (D-32).
 function baseLevel(finding: AssessedFinding): RiskLevel {
   const critical = CRITICAL_CATEGORIES.has(finding.category);
-  const conviction = finding.status === "conviction";
+  const decided = FINAL_DECISIONS.has(finding.status);
   const identityHigh = finding.identityConfidence === "high";
-  if (identityHigh && critical) return "high";
-  if (identityHigh && conviction && finding.severity !== "minor") return "high";
-  if (critical || conviction) return "medium";
+  if (identityHigh && critical) return finding.status === "allegation" ? "medium" : "high";
+  if (identityHigh && decided && finding.severity !== "minor") return "high";
+  if (critical || decided) return "medium";
   if (identityHigh && MODERATE_CATEGORIES.has(finding.category)) return "medium";
   return "low";
 }

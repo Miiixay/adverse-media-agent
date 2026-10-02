@@ -1,7 +1,8 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import testCases from "../fixtures/test-cases.json";
+import { z } from "zod";
+
 import {
   appendRunLog,
   requirePseudonymKey,
@@ -11,18 +12,55 @@ import {
   type ScreeningResult,
 } from "../src/agent";
 
-type TestCase = (typeof testCases)[number];
-type CaseRun = { testCase: TestCase } & ({ result: ScreeningResult } | { error: unknown });
-type Expectation = {
-  risk: string;
-  countedFindings?: number;
-  minCountedFindings?: number;
-  minLowIdentityFindings?: number;
-  // At least one counted finding must carry these values.
-  countedFindingWith?: { language?: string; status?: string };
-};
-
+const FIXED_CASES = "fixtures/test-cases.json";
+const EXTENDED_CASES = "fixtures/extended-cases.json";
 const RESULTS_DIRECTORY = "logs/evaluation";
+// The search call does not retry, so a burst of parallel requests that hit the rate limit would
+// fail cases instead of slowing them down.
+const CONCURRENT_CASES = 4;
+
+const RISK_LEVELS = ["low", "medium", "high"] as const;
+const MATCHED_FIELDS = ["language", "status", "subject", "category"] as const;
+
+const findingMatchSchema = z
+  .object({
+    language: z.string().optional(),
+    status: z.string().optional(),
+    subject: z.string().optional(),
+    category: z.string().optional(),
+  })
+  .strict();
+
+const expectationSchema = z
+  .object({
+    // One level, or the levels the grid can give when a modulator may or may not hold.
+    risk: z.union([z.enum(RISK_LEVELS), z.array(z.enum(RISK_LEVELS)).min(1)]),
+    countedFindings: z.number().int().optional(),
+    minCountedFindings: z.number().int().optional(),
+    minLowIdentityFindings: z.number().int().optional(),
+    minArticlesReviewed: z.number().int().optional(),
+    // At least one counted finding must carry these values.
+    countedFindingWith: findingMatchSchema.optional(),
+    // At least one finding, counted or not, must carry these values.
+    findingWith: findingMatchSchema.optional(),
+  })
+  .strict();
+
+const testCaseSchema = z
+  .object({
+    id: z.string(),
+    input: z.object({ firstName: z.string(), lastName: z.string(), country: z.string() }),
+    expected: expectationSchema,
+    rationale: z.string(),
+    sources: z.array(z.string()).optional(),
+  })
+  .strict();
+
+type TestCase = z.infer<typeof testCaseSchema>;
+type FindingMatch = z.infer<typeof findingMatchSchema>;
+type Finding = ScreeningResult["findings"][number];
+type CaseRun = { testCase: TestCase } & ({ result: ScreeningResult } | { error: unknown });
+
 const COLUMNS = [
   "case",
   "expected",
@@ -31,6 +69,7 @@ const COLUMNS = [
   "status",
   "confidence",
   "counted / findings",
+  "levels",
   "searches",
   "articles",
   "input tokens",
@@ -42,32 +81,46 @@ const COLUMNS = [
   "errors",
 ];
 
+// npm run evaluate -- [--extended] [case ids]
 async function main(): Promise<void> {
   const pseudonymKey = requirePseudonymKey(process.env.LOG_PSEUDONYM_KEY);
-  const [first, ...others] = selectCases(process.argv.slice(2));
+  const args = process.argv.slice(2);
+  const path = args.includes("--extended") ? EXTENDED_CASES : FIXED_CASES;
+  const cases = selectCases(
+    await loadCases(path),
+    args.filter((arg) => arg !== "--extended"),
+  );
+  const [first, ...others] = cases;
   if (first === undefined) {
-    throw new Error("fixtures/test-cases.json holds no case");
+    throw new Error(`${path} holds no case`);
   }
 
   // The first case runs alone: a prompt cache entry becomes readable only once a response has
   // started, so the cases after it can read the entry it writes.
-  const firstRun = await runCase(first, pseudonymKey);
-  const otherRuns = await Promise.all(others.map((testCase) => runCase(testCase, pseudonymKey)));
-  const runs = [firstRun, ...otherRuns];
+  const runs = [await runCase(first, pseudonymKey)];
+  for (let start = 0; start < others.length; start += CONCURRENT_CASES) {
+    const batch = others.slice(start, start + CONCURRENT_CASES);
+    runs.push(...(await Promise.all(batch.map((testCase) => runCase(testCase, pseudonymKey)))));
+  }
 
   console.log(table(runs));
   console.log(totals(runs));
   if (!runs.every(passed)) process.exitCode = 1;
 }
 
+async function loadCases(path: string): Promise<TestCase[]> {
+  const json: unknown = JSON.parse(await readFile(path, "utf8"));
+  return z.array(testCaseSchema).parse(json);
+}
+
 // Case ids on the command line narrow the run: npm run evaluate -- homonym
-function selectCases(ids: readonly string[]): TestCase[] {
-  if (ids.length === 0) return testCases;
-  const unknown = ids.filter((id) => !testCases.some((testCase) => testCase.id === id));
+function selectCases(cases: readonly TestCase[], ids: readonly string[]): TestCase[] {
+  if (ids.length === 0) return [...cases];
+  const unknown = ids.filter((id) => !cases.some((testCase) => testCase.id === id));
   if (unknown.length > 0) {
     throw new Error(`Unknown case id: ${unknown.join(", ")}`);
   }
-  return testCases.filter((testCase) => ids.includes(testCase.id));
+  return cases.filter((testCase) => ids.includes(testCase.id));
 }
 
 // A failed case is reported in the table and in the exit code, without stopping the others.
@@ -83,7 +136,7 @@ async function runCase(testCase: TestCase, pseudonymKey: string): Promise<CaseRu
   }
 }
 
-// The full result, names included: the fixed cases are test data and logs/ stays out of git.
+// The full result, names included: the cases are test data and logs/ stays out of git.
 async function saveResult(id: string, result: ScreeningResult): Promise<void> {
   await mkdir(RESULTS_DIRECTORY, { recursive: true });
   const path = join(RESULTS_DIRECTORY, `${id}.json`);
@@ -92,22 +145,33 @@ async function saveResult(id: string, result: ScreeningResult): Promise<void> {
 
 function passed(run: CaseRun): boolean {
   if (!("result" in run)) return false;
-  const expected: Expectation = run.testCase.expected;
-  const counted = run.result.findings.filter((finding) => finding.countedInScore);
-  const lowIdentity = run.result.findings.length - counted.length;
-  const wanted = expected.countedFindingWith;
+  const { expected } = run.testCase;
+  const { findings, coverage, risk } = run.result;
+  const counted = findings.filter((finding) => finding.countedInScore);
+  const lowIdentity = findings.filter((finding) => finding.identityConfidence === "low");
   return (
-    run.result.risk === expected.risk &&
+    expectedRisks(run.testCase).includes(risk) &&
     (expected.countedFindings === undefined || counted.length === expected.countedFindings) &&
     (expected.minCountedFindings === undefined || counted.length >= expected.minCountedFindings) &&
     (expected.minLowIdentityFindings === undefined ||
-      lowIdentity >= expected.minLowIdentityFindings) &&
-    (wanted === undefined ||
-      counted.some(
-        (finding) =>
-          (wanted.language === undefined || finding.language === wanted.language) &&
-          (wanted.status === undefined || finding.status === wanted.status),
-      ))
+      lowIdentity.length >= expected.minLowIdentityFindings) &&
+    (expected.minArticlesReviewed === undefined ||
+      coverage.articlesReviewed >= expected.minArticlesReviewed) &&
+    (expected.countedFindingWith === undefined ||
+      counted.some((finding) => matches(finding, expected.countedFindingWith ?? {}))) &&
+    (expected.findingWith === undefined ||
+      findings.some((finding) => matches(finding, expected.findingWith ?? {})))
+  );
+}
+
+function expectedRisks(testCase: TestCase): readonly string[] {
+  const { risk } = testCase.expected;
+  return typeof risk === "string" ? [risk] : risk;
+}
+
+function matches(finding: Finding, wanted: FindingMatch): boolean {
+  return MATCHED_FIELDS.every(
+    (field) => wanted[field] === undefined || finding[field] === wanted[field],
   );
 }
 
@@ -117,21 +181,23 @@ function countedFindings(result: ScreeningResult): number {
 
 function table(runs: readonly CaseRun[]): string {
   const rows = runs.map((run) => {
-    const { id, expected } = run.testCase;
+    const { id } = run.testCase;
+    const expected = expectedRisks(run.testCase).join(" or ");
     if (!("result" in run)) {
       const message = run.error instanceof Error ? run.error.message : String(run.error);
-      const failed = [id, expected.risk, "failed", "no"];
+      const failed = [id, expected, "failed", "no"];
       return [...failed, ...Array(COLUMNS.length - failed.length - 1).fill(""), message];
     }
     const { result } = run;
     return [
       id,
-      expected.risk,
+      expected,
       result.risk,
       passed(run) ? "yes" : "no",
       result.status,
       result.confidence,
       `${countedFindings(result)} / ${result.findings.length}`,
+      result.findings.flatMap((finding) => finding.riskLevel ?? []).join(", ") || "none",
       String(result.usage.webSearches),
       String(result.coverage.articlesReviewed),
       String(result.usage.inputTokens),

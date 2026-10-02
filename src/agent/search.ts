@@ -1,8 +1,9 @@
 import Anthropic from "@anthropic-ai/sdk";
 
 import type { PricedModel } from "./cost";
+import { BLOCKED_DOMAINS } from "./data/blocked-domains";
 import { MAX_SEARCHES } from "./prepare";
-import { SYSTEM_PROMPT, buildUserMessage } from "./prompts";
+import { PROMPT_CANARY, SYSTEM_PROMPT, buildUserMessage } from "./prompts";
 import {
   ASSESSMENT_JSON_SCHEMA,
   AssessmentSchema,
@@ -22,10 +23,18 @@ import type {
 export const MODEL: PricedModel = "claude-sonnet-5-5";
 const MAX_OUTPUT_TOKENS = 8_000;
 const MAX_CONTINUATIONS = 3;
-// Sonnet 5.5 defaults to high. Changing it invalidates the prompt cache, so it is fixed here (v2.4).
-const EFFORT = "medium";
+// Sonnet 5.5 defaults to high; medium is kept (D-30). High exists to replay the v1 configuration in
+// measurements (EFFORT). Changing it invalidates the prompt cache.
+export type Effort = "high" | "medium";
 // Retrying a request whose answer never arrived would run and bill the searches a second time.
 const SEARCH_MAX_RETRIES = 0;
+const WEB_PROTOCOLS: ReadonlySet<string> = new Set(["http:", "https:"]);
+// Above this share of search results on blocked domains, the coverage is reported incomplete.
+const MAX_BLOCKED_SHARE = 0.5;
+const COMPROMISED: CoverageError = {
+  code: "compromised",
+  detail: "the answer reproduced the prompt canary",
+};
 
 const NO_USAGE: TokenUsage = {
   inputTokens: 0,
@@ -43,6 +52,7 @@ export async function searchAdverseMedia(
   input: ScreeningInput,
   plan: SearchPlan,
   timeBudgetMs: number,
+  effort: Effort = "medium",
 ): Promise<SearchOutcome> {
   const request = {
     model: MODEL,
@@ -53,7 +63,7 @@ export async function searchAdverseMedia(
     system: [{ type: "text", text: SYSTEM_PROMPT, cache_control: { type: "ephemeral" } }],
     tools: [webSearchTool(input.country, plan.countrySupported)],
     output_config: {
-      effort: EFFORT,
+      effort,
       format: { type: "json_schema", schema: ASSESSMENT_JSON_SCHEMA },
     },
   } satisfies Omit<Anthropic.MessageCreateParamsNonStreaming, "messages">;
@@ -85,6 +95,12 @@ export async function searchAdverseMedia(
     // A long search turn can pause; sending the paused content back unchanged resumes it.
     messages = [...messages, { role: "assistant", content: response.content }];
   }
+}
+
+export function parseEffort(value: string | undefined): Effort {
+  if (value === undefined || value === "" || value === "medium") return "medium";
+  if (value === "high") return "high";
+  throw new Error(`EFFORT must be high or medium, got "${value}"`);
 }
 
 // A request cut by the timeout has no usage to report, although the API may still have run and
@@ -124,6 +140,12 @@ export function interpretTurn(responses: readonly Anthropic.Message[]): SearchOu
   const sourced = parsed.ok
     ? attachSources(parsed.assessment.findings, search.articles)
     : { findings: [], rejectedUrls: [] };
+  const errors = [
+    ...search.errors,
+    ...(parsed.ok ? [] : [parsed.error]),
+    ...(leaksCanary(content) ? [COMPROMISED] : []),
+    ...(isFlooded(search.articles) ? [floodedError(search.articles)] : []),
+  ];
 
   return {
     summary: parsed.ok ? parsed.assessment.summary : null,
@@ -131,7 +153,7 @@ export function interpretTurn(responses: readonly Anthropic.Message[]): SearchOu
     rejectedUrls: sourced.rejectedUrls,
     articles: search.articles,
     executedQueries: search.queries,
-    errors: parsed.ok ? search.errors : [...search.errors, parsed.error],
+    errors,
     usage: sumUsage(responses),
     model: final.model,
     apiCalls: responses.length,
@@ -176,6 +198,15 @@ export function collectSearch(content: readonly Anthropic.ContentBlock[]): {
   return { articles: [...articles.values()], queries: [...queriesById.values()], errors };
 }
 
+// Every text block counts, not only the JSON: a leak can sit in a sentence written between
+// searches. The comparison ignores case, the model may change it.
+export function leaksCanary(content: readonly Anthropic.ContentBlock[]): boolean {
+  const canary = PROMPT_CANARY.toLowerCase();
+  return content.some(
+    (block) => block.type === "text" && block.text.toLowerCase().includes(canary),
+  );
+}
+
 // The JSON is read from the last text block: the model may write a sentence before searching.
 export function parseAssessment(content: readonly Anthropic.ContentBlock[]): ParsedAssessment {
   const lastText = content
@@ -209,7 +240,7 @@ export function attachSources(
   const rejectedUrls: string[] = [];
   for (const finding of findings) {
     const article = articlesByUrl.get(finding.url);
-    if (article === undefined) {
+    if (article === undefined || !isAcceptedSource(finding.url)) {
       rejectedUrls.push(finding.url);
       continue;
     }
@@ -217,16 +248,50 @@ export function attachSources(
     if (kept.has(finding.url)) continue;
 
     const otherUrls = [...new Set(finding.corroboratingUrls)].filter((url) => url !== finding.url);
-    rejectedUrls.push(...otherUrls.filter((url) => !articlesByUrl.has(url)));
+    const sourcedUrls = otherUrls.filter((url) => articlesByUrl.has(url) && isAcceptedSource(url));
+    rejectedUrls.push(...otherUrls.filter((url) => !sourcedUrls.includes(url)));
     kept.set(finding.url, {
       ...finding,
       title: article.title,
-      corroboratingUrls: otherUrls
-        .filter((url) => articlesByUrl.has(url))
-        .slice(0, MAX_CORROBORATING_URLS),
+      corroboratingUrls: sourcedUrls.slice(0, MAX_CORROBORATING_URLS),
     });
   }
   return { findings: [...kept.values()], rejectedUrls };
+}
+
+// The interface renders these URLs as links: a javascript: or data: URL would run in the page,
+// even one that came back as a search result. A page anyone can write is no evidence (D-37).
+function isAcceptedSource(url: string): boolean {
+  return URL.canParse(url) && WEB_PROTOCOLS.has(new URL(url).protocol) && !isBlockedDomain(url);
+}
+
+// An entry blocks its domain and every subdomain; an entry with a path blocks that part of the
+// site only.
+export function isBlockedDomain(url: string): boolean {
+  if (!URL.canParse(url)) return false;
+  const { hostname, pathname } = new URL(url);
+  return BLOCKED_DOMAINS.some((entry) => {
+    const slash = entry.indexOf("/");
+    const domain = slash === -1 ? entry : entry.slice(0, slash);
+    const path = slash === -1 ? "" : entry.slice(slash);
+    const onDomain = hostname === domain || hostname.endsWith(`.${domain}`);
+    return onDomain && (path === "" || pathname === path || pathname.startsWith(`${path}/`));
+  });
+}
+
+// The blocked domains are filtered here rather than on the search tool, whose filter changes the
+// whole result set (D-37). If such pages crowd out the rest, the search covered little else.
+export function isFlooded(articles: readonly RawArticle[]): boolean {
+  const blocked = articles.filter((article) => isBlockedDomain(article.url)).length;
+  return blocked > articles.length * MAX_BLOCKED_SHARE;
+}
+
+function floodedError(articles: readonly RawArticle[]): CoverageError {
+  const blocked = articles.filter((article) => isBlockedDomain(article.url)).length;
+  return {
+    code: "flooded",
+    detail: `${blocked} of ${articles.length} search results are on blocked domains`,
+  };
 }
 
 function webSearchTool(

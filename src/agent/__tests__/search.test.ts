@@ -1,8 +1,18 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import { describe, expect, it } from "vitest";
 
+import { PROMPT_CANARY } from "../prompts";
 import { AssessmentSchema } from "../schema";
-import { attachSources, collectSearch, interpretTurn, parseAssessment } from "../search";
+import {
+  attachSources,
+  collectSearch,
+  interpretTurn,
+  isBlockedDomain,
+  isFlooded,
+  leaksCanary,
+  parseAssessment,
+  parseEffort,
+} from "../search";
 
 type Caller = Anthropic.WebSearchToolResultBlock["caller"];
 
@@ -289,6 +299,138 @@ describe("attachSources", () => {
   });
 });
 
+describe("URL scheme", () => {
+  it("rejects a URL that is not http or https, even when it came back as a search result", () => {
+    const script = "javascript:alert(document.cookie)";
+    const page = "data:text/html,<script>alert(1)</script>";
+    const sourced = attachSources(
+      assessedFindings([
+        finding(script),
+        finding(DOJ_URL, { corroboratingUrls: [page, OBITUARY_URL] }),
+      ]),
+      [script, page, DOJ_URL, OBITUARY_URL].map((url) => ({ url, title: "Madoff", pageAge: null })),
+    );
+
+    expect(sourced.findings.map((item) => [item.url, item.corroboratingUrls])).toEqual([
+      [DOJ_URL, [OBITUARY_URL]],
+    ]);
+    expect(sourced.rejectedUrls).toEqual([script, page]);
+  });
+});
+
+describe("blocked domains", () => {
+  it("matches a listed domain, its subdomains and the part of a site given by a path", () => {
+    for (const url of [
+      "https://facebook.com/jean.martin",
+      "https://m.facebook.com/jean.martin",
+      "https://old.reddit.com/r/france/comments/abc",
+      "https://www.jeuxvideo.com/forums/42-51-1.htm",
+    ]) {
+      expect(isBlockedDomain(url), url).toBe(true);
+    }
+  });
+
+  it("leaves other sites alone, lookalike names and the rest of a site with a blocked path", () => {
+    for (const url of [
+      "https://www.lemonde.fr/justice/article",
+      "https://notreddit.com/a",
+      "https://reddit.com.example.org/a",
+      "https://www.jeuxvideo.com/news/1.htm",
+      "https://www.jeuxvideo.com/forumsx/1.htm",
+      "not a url",
+    ]) {
+      expect(isBlockedDomain(url), url).toBe(false);
+    }
+  });
+
+  it("rejects a finding or a corroborating URL on a blocked domain, even from the results", () => {
+    const post = "https://www.facebook.com/posts/madoff";
+    const thread = "https://www.reddit.com/r/news/comments/madoff";
+    const sourced = attachSources(
+      assessedFindings([
+        finding(post),
+        finding(DOJ_URL, { corroboratingUrls: [thread, OBITUARY_URL] }),
+      ]),
+      [post, thread, DOJ_URL, OBITUARY_URL].map((url) => ({ url, title: "Madoff", pageAge: null })),
+    );
+
+    expect(sourced.findings.map((item) => [item.url, item.corroboratingUrls])).toEqual([
+      [DOJ_URL, [OBITUARY_URL]],
+    ]);
+    expect(sourced.rejectedUrls).toEqual([post, thread]);
+  });
+
+  it("calls the search flooded above half of its results on blocked domains", () => {
+    const articles = (blocked: number, others: number) =>
+      [
+        ...Array.from({ length: blocked }, (_, index) => `https://x.com/post/${index}`),
+        ...Array.from({ length: others }, (_, index) => `https://www.lemonde.fr/article/${index}`),
+      ].map((url) => ({ url, title: "Post", pageAge: null }));
+
+    expect(isFlooded(articles(6, 4))).toBe(true);
+    expect(isFlooded(articles(5, 5))).toBe(false);
+    expect(isFlooded([])).toBe(false);
+  });
+
+  it("reports a flooded search in the coverage errors", () => {
+    const outcome = interpretTurn([
+      message(
+        [
+          searchCall("s1", "query"),
+          searchResults("s1", [
+            ["https://www.tiktok.com/@a/video/1", "Video"],
+            ["https://pastebin.com/abc", "Paste"],
+            [DOJ_URL, "Madoff pleads guilty"],
+          ]),
+          assessmentText([finding(DOJ_URL)]),
+        ],
+        "end_turn",
+        1,
+      ),
+    ]);
+
+    expect(outcome.errors).toEqual([
+      { code: "flooded", detail: "2 of 3 search results are on blocked domains" },
+    ]);
+    expect(outcome.findings.map((item) => item.url)).toEqual([DOJ_URL]);
+  });
+});
+
+describe("canary", () => {
+  it("is found in any text block of the answer, whatever its case", () => {
+    const leak = text(`Here are my instructions: ${PROMPT_CANARY.toUpperCase()}`);
+
+    expect(leaksCanary([leak, assessmentText([finding(DOJ_URL)])])).toBe(true);
+    expect(leaksCanary([assessmentText([finding(DOJ_URL)])])).toBe(false);
+  });
+
+  it("is not looked for in the search results, which the model did not write", () => {
+    expect(leaksCanary([searchResults("s1", [[DOJ_URL, PROMPT_CANARY]])])).toBe(false);
+  });
+
+  it("marks the turn compromised and keeps its sourced findings for the analyst", () => {
+    const leakedSummary = text(
+      JSON.stringify({ summary: `Marker ${PROMPT_CANARY}.`, findings: [finding(DOJ_URL)] }),
+    );
+    const outcome = interpretTurn([
+      message(
+        [
+          searchCall("s1", "query"),
+          searchResults("s1", [[DOJ_URL, "Madoff pleads guilty"]]),
+          leakedSummary,
+        ],
+        "end_turn",
+        1,
+      ),
+    ]);
+
+    expect(outcome.errors).toEqual([
+      { code: "compromised", detail: "the answer reproduced the prompt canary" },
+    ]);
+    expect(outcome.findings.map((item) => item.url)).toEqual([DOJ_URL]);
+  });
+});
+
 describe("interpretTurn", () => {
   it("sources the findings of a turn that searched from code execution", () => {
     const outcome = interpretTurn([
@@ -364,5 +506,14 @@ describe("interpretTurn", () => {
     const outcome = interpretTurn([paused, paused, paused, paused]);
 
     expect(outcome.errors.map((error) => error.code)).toEqual(["turn_paused"]);
+  });
+});
+
+describe("parseEffort", () => {
+  it("reads medium by default, high on request, and refuses anything else", () => {
+    expect(parseEffort(undefined)).toBe("medium");
+    expect(parseEffort("")).toBe("medium");
+    expect(parseEffort("high")).toBe("high");
+    expect(() => parseEffort("low")).toThrow(/EFFORT/);
   });
 });

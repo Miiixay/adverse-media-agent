@@ -51,3 +51,5 @@ next-env.d.ts
 
 # the example env file is the documentation of the required variables
 !.env.example
+review.zip
+gitlog.txt

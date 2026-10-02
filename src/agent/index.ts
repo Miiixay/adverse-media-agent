@@ -6,8 +6,8 @@ import { estimateCostUsd } from "./cost";
 import { parseQueriesPerLanguage, prepare } from "./prepare";
 import { PROMPT_VERSION } from "./prompts";
 import { screeningInputSchema } from "./schema";
-import { isCoverageComplete, score } from "./score";
-import { MODEL, searchAdverseMedia } from "./search";
+import { isCoverageComplete, score, untrustedScore } from "./score";
+import { MODEL, parseEffort, searchAdverseMedia } from "./search";
 import type { ScreeningInput, ScreeningResult } from "./types";
 
 export { appendRunLog, requirePseudonymKey, runLogEntry } from "./cost";
@@ -22,7 +22,13 @@ export async function screenIndividual(rawInput: ScreeningInput): Promise<Screen
   const input = screeningInputSchema.parse(rawInput);
   const screenedAt = new Date();
   const plan = prepare(input, parseQueriesPerLanguage(process.env.QUERIES_PER_LANGUAGE));
-  const outcome = await searchAdverseMedia(new Anthropic(), input, plan, SEARCH_TIME_BUDGET_MS);
+  const outcome = await searchAdverseMedia(
+    new Anthropic(),
+    input,
+    plan,
+    SEARCH_TIME_BUDGET_MS,
+    parseEffort(process.env.EFFORT),
+  );
 
   const plannedQueries = plan.queries.map((query) => query.text);
   const coverageComplete = isCoverageComplete(
@@ -30,7 +36,10 @@ export async function screenIndividual(rawInput: ScreeningInput): Promise<Screen
     outcome.executedQueries,
     outcome.errors,
   );
-  const { risk, confidence, findings } = score(outcome.findings, coverageComplete, screenedAt);
+  const compromised = outcome.errors.some((error) => error.code === "compromised");
+  const { risk, confidence, findings } = compromised
+    ? untrustedScore(outcome.findings)
+    : score(outcome.findings, coverageComplete, screenedAt);
 
   return {
     status: coverageComplete ? "complete" : "incomplete",
@@ -45,6 +54,7 @@ export async function screenIndividual(rawInput: ScreeningInput): Promise<Screen
       executedQueries: outcome.executedQueries,
       searchesUsed: outcome.usage.webSearches,
       articlesReviewed: outcome.articles.length,
+      urlsReviewed: outcome.articles.map((article) => article.url),
       rejectedUrls: outcome.rejectedUrls,
       errors: outcome.errors,
     },

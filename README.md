@@ -25,6 +25,7 @@ cp .env.example .env.local
 | `CRON_SECRET`          | `GET /api/cron/daily`  | Bearer token expected from Vercel Cron                                |
 | `DATABASE_URL`         | the app                | Postgres connection string                                            |
 | `QUERIES_PER_LANGUAGE` | measurements only      | `2` replays the v1 search plan, two queries per language; default `1` |
+| `EFFORT`               | measurements only      | `high` replays the v1 effort; default `medium`                        |
 
 Generate `LOG_PSEUDONYM_KEY` with:
 
@@ -43,6 +44,7 @@ node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"
 | `npm run format`                   | Prettier                                                           |
 | `npm run screen -- Jean Martin FR` | One screening, printed as JSON and logged                          |
 | `npm run evaluate`                 | Replays `fixtures/test-cases.json` and prints the comparison table |
+| `npm run evaluate -- --extended`   | Replays `fixtures/extended-cases.json`, the wider validation set   |
 
 `screen` and `evaluate` call the Claude API and cost money. They run with
 `tsx --conditions=react-server`, the resolution condition of the Next.js server bundle, so that

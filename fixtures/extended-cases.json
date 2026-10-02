@@ -1,0 +1,123 @@
+[
+  {
+    "id": "sanctions",
+    "input": { "firstName": "Mehmet Hakan", "lastName": "Atilla", "country": "TR" },
+    "expected": {
+      "risk": "high",
+      "minCountedFindings": 1,
+      "countedFindingWith": { "category": "sanctions", "status": "conviction" }
+    },
+    "rationale": "Former deputy general manager of Halkbank, convicted in New York in January 2018 of taking part in a scheme to evade US sanctions on Iran, sentenced to 32 months on 16 May 2018. Tests the sanctions category, untested so far, and Turkish.",
+    "sources": [
+      "https://www.aljazeera.com/news/2018/5/16/mehmet-hakan-atilla-gets-32-month-sentence-in-iran-sanctions-case",
+      "https://aa.com.tr/en/americas/us-former-turkish-banker-gets-32-months-in-prison/1148414"
+    ]
+  },
+  {
+    "id": "regulator",
+    "input": { "firstName": "Jes", "lastName": "Staley", "country": "GB" },
+    "expected": {
+      "risk": ["medium", "high"],
+      "minCountedFindings": 1,
+      "countedFindingWith": { "category": "regulatory" }
+    },
+    "rationale": "Former Barclays chief executive. The FCA banned him from senior roles and fined him for misleading it about his relationship with Jeffrey Epstein; the Upper Tribunal upheld the ban on 26 June 2025 and set the fine at 1.1 million pounds. Tests the regulatory category: medium at high identity, high if two modulators hold (recent, official source, corroborated).",
+    "sources": ["https://www.fca.org.uk/news/press-releases/upper-tribunal-upholds-jes-staley-ban"]
+  },
+  {
+    "id": "acquittal",
+    "input": { "firstName": "Christian", "lastName": "Wulff", "country": "DE" },
+    "expected": { "risk": "low", "findingWith": { "status": "acquitted" } },
+    "rationale": "Former German Federal President, acquitted in February 2014 by the Hanover regional court of accepting benefits as Minister-President of Lower Saxony; final after the prosecution withdrew its appeal. Tests that a matter ending in acquittal is reported with its final status and does not raise the risk.",
+    "sources": [
+      "https://www.tagesspiegel.de/politik/freispruch-von-christian-wulff-ist-rechtskraftig-4822252.html",
+      "https://www.lto.de/recht/hintergruende/h/lg-hannover-urteil-40kls612-wulff-korruption-freispruch"
+    ]
+  },
+  {
+    "id": "investigation",
+    "input": { "firstName": "Daniela", "lastName": "Santanchè", "country": "IT" },
+    "expected": {
+      "risk": "high",
+      "minCountedFindings": 1,
+      "countedFindingWith": { "status": "indictment" }
+    },
+    "rationale": "Italian Tourism Minister, sent to trial on 17 January 2025 in Milan for false accounting at Visibilia, verdict expected by October 2026 at the latest. Tests a matter without conviction: the status must not be conviction. Under the current grid a critical category at high identity is high whatever the status.",
+    "sources": [
+      "https://www.lapresse.it/politica/2025/01/17/visibilia-santanche-rinviata-a-giudizio-va-a-processo/",
+      "https://www.ansa.it/sito/notizie/cronaca/2025/10/21/falso-in-bilancio-per-santanche-sentenza-entro-un-anno_5da9a614-8e34-4cb3-9eae-439c7cb5cdf4.html"
+    ]
+  },
+  {
+    "id": "spanish",
+    "input": { "firstName": "Rodrigo", "lastName": "Rato", "country": "ES" },
+    "expected": {
+      "risk": "high",
+      "minCountedFindings": 1,
+      "countedFindingWith": { "language": "es", "status": "conviction" }
+    },
+    "rationale": "Former Spanish economy minister and IMF managing director, sentenced on 20 December 2024 by the Madrid provincial court to four years, nine months and one day for three tax offences, money laundering and corruption between private parties; open to appeal before the Supreme Court. Tests recall in Spanish.",
+    "sources": [
+      "https://www.poderjudicial.es/cgpj/es/Poder-Judicial/Noticias-Judiciales/La-Audiencia-Provincial-condena-a-Rodrigo-Rato-a-cuatro-anos--nueve-meses-y-un-dia-de-carcel-",
+      "https://www.infobae.com/espana/agencias/2024/12/20/rato-condenado-a-4-anos-de-carcel-y-2-millones-por-blanqueo-y-tres-delitos-fiscales/"
+    ]
+  },
+  {
+    "id": "polish",
+    "input": { "firstName": "Józef", "lastName": "Pinior", "country": "PL" },
+    "expected": {
+      "risk": "high",
+      "minCountedFindings": 1,
+      "countedFindingWith": { "language": "pl", "status": "conviction" }
+    },
+    "rationale": "Former senator and member of the European Parliament, Solidarity activist. The Wroclaw court of appeal upheld on 3 March 2021 his sentence of 18 months in prison for taking at least 40,000 zloty in bribes; the judgment is final. Tests recall in Polish.",
+    "sources": [
+      "https://www.rmf24.pl/fakty/polska/news-podtrzymany-wyrok-wiezienia-dla-jozefa-piniora-byly-senator-,nId,5083951"
+    ]
+  },
+  {
+    "id": "organization",
+    "input": { "firstName": "Valentin", "lastName": "Stalf", "country": "DE" },
+    "expected": {
+      "risk": ["medium", "high"],
+      "minCountedFindings": 1,
+      "countedFindingWith": { "subject": "organization" }
+    },
+    "rationale": "Co-founder and co-chief executive of N26 until 2025. BaFin fined N26 9.2 million euros in 2024 for late reporting of suspected money laundering in 2022, while he ran the bank; no case against him personally was found. Tests a finding about an organization the person leads.",
+    "sources": [
+      "https://www.trendingtopics.eu/n26-bafin-verhaengt-strafe-von-92-mio-euro-wegen-geldwaescheverdacht/",
+      "https://n26.com/de-de/presse/pressemitteilung/stellungnahme-zum-bussgeldbescheid-der-bundesanstalt-fuer-finanzdienstleistungsaufsicht",
+      "https://www.amlintelligence.com/2025/08/latest-n26-founder-valentin-stalf-steps-down-as-co-ceo/"
+    ]
+  },
+  {
+    "id": "homonym-abroad",
+    "input": { "firstName": "Michael", "lastName": "Cohen", "country": "DE" },
+    "expected": { "risk": "low", "countedFindings": 0, "minLowIdentityFindings": 1 },
+    "rationale": "The input names a person in Germany. Donald Trump's former lawyer, a namesake in the United States, was sentenced in December 2018 to three years for tax evasion, false statements to a bank and campaign finance violations. Tests that a famous namesake in another country comes back at low identity and is not counted.",
+    "sources": ["https://www.justice.gov/usao-sdny/pr/michael-cohen-sentenced-3-years-prison"]
+  },
+  {
+    "id": "clean-public-figure",
+    "input": { "firstName": "Svante", "lastName": "Pääbo", "country": "SE" },
+    "expected": { "risk": "low", "countedFindings": 0, "minArticlesReviewed": 1 },
+    "rationale": "Swedish geneticist, 2022 Nobel laureate in medicine, widely covered, with no adverse coverage found in a search for controversy, scandal, investigation or lawsuit. Tests that coverage of a public figure without any matter produces no finding.",
+    "sources": [
+      "https://www.uu.se/en/news/2022/2022-12-09-svante-paabos-path-to-the-nobel-prize-began-in-uppsala"
+    ]
+  },
+  {
+    "id": "sparse-local",
+    "input": { "firstName": "Mouslim", "lastName": "Abdourahaman", "country": "FR" },
+    "expected": {
+      "risk": "high",
+      "minCountedFindings": 1,
+      "countedFindingWith": { "language": "fr", "status": "conviction" }
+    },
+    "rationale": "Former mayor of Boueni, Mayotte, convicted on 10 December 2024 by the Mamoudzou criminal court of favoritism and unlawful taking of interest: three years in prison of which one suspended, ten years of ineligibility, provisional execution. Appeal heard in April 2025; its decision was not found. Covered by the local weekly Mayotte Hebdo: tests recall on sparse local coverage.",
+    "sources": [
+      "https://www.mayottehebdo.com/actualite/justice/mouslim-abdourahaman-dechu-de-son-mandat-de-maire-de-boueni",
+      "https://www.mayottehebdo.com/actualite/justice/lex-maire-de-boueni-juge-en-appel-ce-jeudi/"
+    ]
+  }
+]

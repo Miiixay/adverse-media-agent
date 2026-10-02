@@ -357,3 +357,127 @@ Consequences: fewer free searches. On a truly ambiguous identity, the model may 
 would settle it, a situation the fixtures do not cover; the completeness check catches a skipped
 planned query, not a skipped free one. The value is a constant, since changing it invalidates the
 cache.
+
+### D-32 — An allegation alone starts at medium; any official step is high
+
+Context: the grid gave high to any matter in a critical category at high identity, whatever its
+status. The extended validation showed it on an ongoing trial, and the same rule applied to a press
+allegation without any official step.
+Options: (a) keep high for every status; (b) medium for investigations and allegations; (c) high
+from the first official step, investigation, indictment, conviction or sanction, and medium for an
+allegation alone, raised to high by two modulators.
+Decision: (c). An unclear status stays high, the cautious reading when the article does not say;
+an acquittal stays low.
+Reasons: an official step means an authority found grounds to act, a press allegation does not.
+Corroboration by other outlets, a reliable source or recency still take an allegation to high. The
+trial of Daniela Santanchè stays high.
+Consequences: one test per status in `score.test.ts`, and `PLAN.md` section 4 states the rule.
+Each finding now exposes `riskLevel`, the level it gives the risk, null when it is not counted, so
+the analyst sees which finding drives the result.
+
+### D-33 — A status for final administrative and regulatory decisions
+
+Context: in the extended validation, the FCA ban on Jes Staley came back as `unclear` in one run and
+as `conviction` in the other, and an ineligibility pronounced by the Constitutional Council as
+`conviction`. The risk then depended on an arbitrary label.
+Options: (a) leave the model to choose among the existing statuses; (b) a status `sanctioned` for a
+final administrative or regulatory decision against the person (fine, ban, ineligibility, listing
+on a sanctions list), treated by the grid like a conviction.
+Decision: (b).
+Reasons: for an analyst, a final decision of a regulator or an administrative body is as settled as
+a verdict. Naming it removes the arbitrary choice between two wrong labels.
+Consequences: a sanction of critical or moderate severity at high identity is high in any category,
+like a conviction; a minor one is medium. The schema describes the status, and the prompt has to
+define it as well.
+
+### D-34 — A finding about an organization is capped at medium
+
+Context: in the v3 validation, a BaFin fine on N26 came back as a finding with `subject:
+organization`, status `sanctioned`, moderate severity, at high identity. The grid rated it high,
+twice over: a final sanction of moderate severity counts like a conviction (D-33), and three
+modulators held. The risk of the co-founder was then high on a fine against the bank, with no case
+against him personally.
+Options: (a) leave organization findings on the grid of the person; (b) never count them, like
+associates (D-28); (c) count them, capped at medium.
+Decision: (c).
+Reasons: a matter of an organization the person leads is relevant to an analyst, so it must weigh
+on the risk; it does not establish the person's own part in it, which is what high means. The cap
+works like the one on medium identity: modulators make the facts more credible, not the person's
+involvement.
+Consequences: three tests in `score.test.ts`. Replayed on the archived v3 results, only the
+organization case changes, from high to medium, which the fixture accepts. A person charged or
+convicted in the same matter gets a finding of their own, with `subject: person`, and the cap does
+not apply to it.
+
+### D-35 — A language tag in front of an executed query does not make the coverage incomplete
+
+Context: the user message lists each planned query after its language tag, `[pl] "Józef Pinior" ...`.
+In one run out of about forty-five, the model copied the tag into the four queries it ran. Every
+planned query ran, but the exact comparison missed them, and the result came back `incomplete` with
+no error.
+Options: (a) change the user message so that it shows no tag next to the query, a prompt change;
+(b) compare after removing a two-letter tag in brackets at the start of the executed query; (c)
+compare loosely, ignoring case, punctuation or extra words.
+Decision: (b).
+Reasons: the tag is the only change observed, and the search engine runs the same query with or
+without it. A loose comparison would also accept a query the model rewrote, which is the case the
+check exists to catch. The prompt stays unchanged.
+Consequences: `executedQueries` keeps the queries as the model ran them; only the comparison removes
+the tag. Two tests in `score.test.ts`: a tagged query counts as run, any other change does not.
+Replayed on the archived result, the coverage is complete.
+
+### D-36 — Four defenses around the model: canary, strict input, web URLs only, blocked domains
+
+Context: the model reads pages anyone can write and returns text that the interface will render.
+The existing guards were the rule that web content is data, the schema-validated output, URLs
+filtered on the search results, and a score computed in code. They did not detect an injection that
+succeeded, nor stop a `javascript:` link or a line break at the end of a name.
+Options: for detection, (a) nothing beyond the prompt rule, (b) a canary in the system prompt, (c) a
+second model call that audits the answer; for sources, (a) no filter, (b) a block list, (c) an
+allow list of outlets.
+Decision: four deterministic measures. (1) A random canary in the system prompt, which the model is
+told never to write; if it appears in any text block of the answer, the error `compromised` goes to
+`coverage.errors` and no finding is counted (`untrustedScore`). (2) Names refuse control characters,
+line breaks included, before trimming, on top of the letter-only pattern and the 100-character
+limit. (3) A finding URL or corroborating URL must use http or https; any other scheme goes to
+`rejectedUrls`, even when it came back as a search result. (4) `blocked_domains` on the search tool:
+social networks, pastebins and forums, listed in `data/blocked-domains.ts`.
+Reasons: each measure is code, testable without the network and free per screening. An audit call
+would double the cost and is itself exposed to the injection it audits. An allow list would cut the
+regional outlets that carried the native-language cases (`docs/evaluation.md`); a block list removes
+pages without editorial control, where rumours and planted instructions are most likely.
+Consequences: prompt `v6`. The canary detects a leak, not an injection that only bends the
+assessment; the adversarial case planned in `docs/security.md` is the test for that. A compromised
+result is reported low at low confidence and incomplete, like any blocking error, with its findings
+visible and uncounted. On the five fixed cases, run once with the four measures: 5/5, no finding
+expected lost, no false `compromised`. Wikipedia, which is not on the list, returned no result in
+any case, against 22 URLs read in the previous run. Replayed on the homonym case, the cause is the
+filter itself: with the full list or without the forums, the same result set without Wikipedia;
+without the list, the result set of the run before it (see `logs/comparison.md`).
+
+### D-37 — Blocked domains are filtered in code, not on the search tool
+
+Context: with `blocked_domains` on the search tool (D-36), the search returned a different result
+set, not the same set minus the listed sites. On the homonym case, the full list and a list without
+the forums both returned ten URLs without Wikipedia; without the list, the result set of the run
+before it came back, Wikipedia included. None of the 71 URLs read on the five fixed cases before the
+list was on it. On those cases, the filter blocked nothing observed and removed 22 Wikipedia pages,
+which the model uses to tell namesakes apart.
+Options: (a) keep the filter on the tool and accept the loss; (b) drop the list; (c) keep the list
+and apply it in code to the finding URLs, with a guard for a search that returns mostly blocked
+pages.
+Decision: (c). A finding URL or corroborating URL on a blocked domain goes to `rejectedUrls`, like a
+URL outside the results or with another scheme. When more than half of the search results are on
+blocked domains (`MAX_BLOCKED_SHARE`), `coverage.errors` gets `flooded` and the result is
+`incomplete`.
+Reasons: the code filter keeps the guarantee that no social network, pastebin or forum serves as
+evidence, without changing what the search returns. The model can read those pages again, so the
+injection surface is no longer reduced upstream; the canary, the score in code and the URL filter
+remain. The guard makes the one case where the tool filter would matter visible: a name whose
+results are mostly such pages.
+Condition for going back: the filter returns to the search tool if `flooded` is observed in the
+runs, on the fixed cases, the extended cases or in production logs. The run log keeps the error
+codes, so the condition can be checked without names.
+Consequences: five tests in `search.test.ts` and one in `score.test.ts`. On the five fixed cases,
+run once: 5/5, Wikipedia back with 22 URLs, as many as before the list, no URL rejected, no
+`flooded`.

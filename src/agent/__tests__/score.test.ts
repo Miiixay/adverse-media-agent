@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { findingLevel, isCorroborated, isCoverageComplete, score } from "../score";
+import { findingLevel, isCorroborated, isCoverageComplete, score, untrustedScore } from "../score";
 import type { AssessedFinding } from "../types";
 
 const SCREENED_AT = new Date("2026-10-01T00:00:00Z");
@@ -135,6 +135,85 @@ describe("score", () => {
   });
 });
 
+describe("statuses", () => {
+  it("starts an allegation alone in a critical category at medium", () => {
+    expect(findingLevel(finding({ status: "allegation" }), SCREENED_AT)).toBe("medium");
+  });
+
+  it("raises that allegation to high when two modulators hold", () => {
+    const corroboratedAllegation = finding({
+      status: "allegation",
+      date: "2026-03-01",
+      sourceReliability: "official",
+    });
+
+    expect(findingLevel(corroboratedAllegation, SCREENED_AT)).toBe("high");
+  });
+
+  it("keeps every official step in a critical category high, and an unclear status too", () => {
+    for (const status of [
+      "investigation",
+      "indictment",
+      "conviction",
+      "sanctioned",
+      "unclear",
+    ] as const) {
+      expect(findingLevel(finding({ status }), SCREENED_AT), status).toBe("high");
+    }
+  });
+
+  it("keeps a trial for false accounting high, as in the Santanchè case", () => {
+    const trial = finding({ category: "fraud", status: "indictment", language: "it" });
+
+    expect(score([trial], true, SCREENED_AT).risk).toBe("high");
+  });
+
+  it("treats a final regulatory sanction like a conviction", () => {
+    const sanction = { category: "regulatory", status: "sanctioned" } as const;
+
+    expect(findingLevel(finding({ ...sanction, severity: "moderate" }), SCREENED_AT)).toBe("high");
+    expect(findingLevel(finding({ ...sanction, severity: "minor" }), SCREENED_AT)).toBe("medium");
+    expect(findingLevel(finding({ ...sanction, identityConfidence: "medium" }), SCREENED_AT)).toBe(
+      "medium",
+    );
+  });
+});
+
+describe("untrustedScore", () => {
+  it("counts no finding of a compromised answer and reports low at low confidence", () => {
+    const result = untrustedScore([finding(), finding({ url: LE_FIGARO, status: "conviction" })]);
+
+    expect(result.risk).toBe("low");
+    expect(result.confidence).toBe("low");
+    expect(result.findings.map((item) => [item.url, item.countedInScore, item.riskLevel])).toEqual([
+      [LE_MONDE, false, null],
+      [LE_FIGARO, false, null],
+    ]);
+  });
+});
+
+describe("level per finding", () => {
+  it("exposes the level of each counted finding and null for the others", () => {
+    const result = score(
+      [
+        finding({ url: "https://homonym.fr/a", identityConfidence: "low" }),
+        finding({ url: "https://amf-france.org/a", category: "regulatory" }),
+        finding({ url: "https://corsematin.com/a", subject: "associate" }),
+        finding({ url: "https://justice.fr/a" }),
+      ],
+      true,
+      SCREENED_AT,
+    );
+
+    expect(result.findings.map((item) => [item.url, item.riskLevel])).toEqual([
+      ["https://justice.fr/a", "high"],
+      ["https://amf-france.org/a", "medium"],
+      ["https://corsematin.com/a", null],
+      ["https://homonym.fr/a", null],
+    ]);
+  });
+});
+
 describe("subject", () => {
   it("never counts a finding about an associate, even a conviction at high identity", () => {
     const result = score(
@@ -159,8 +238,36 @@ describe("subject", () => {
     expect(score([finding({ subject: "associate" })], true, SCREENED_AT).confidence).toBe("high");
   });
 
-  it("counts a finding about an organization linked to the person", () => {
-    expect(score([finding({ subject: "organization" })], true, SCREENED_AT).risk).toBe("high");
+  it("counts a finding about an organization linked to the person, capped at medium", () => {
+    const result = score([finding({ subject: "organization" })], true, SCREENED_AT);
+
+    expect(result.risk).toBe("medium");
+    expect(result.findings.map((item) => item.countedInScore)).toEqual([true]);
+  });
+
+  it("keeps a sanctioned organization at medium even when every modulator holds, as for N26", () => {
+    const fine = finding({
+      subject: "organization",
+      category: "regulatory",
+      status: "sanctioned",
+      severity: "moderate",
+      date: "2025-08-19",
+      sourceReliability: "national_press",
+      corroboratingUrls: ["https://tech.eu/a", "https://sifted.eu/a"],
+    });
+
+    expect(findingLevel(fine, SCREENED_AT)).toBe("medium");
+  });
+
+  it("caps an organization matter without lowering it below medium", () => {
+    const dispute = finding({
+      subject: "organization",
+      category: "civil_litigation",
+      status: "allegation",
+      severity: "minor",
+    });
+
+    expect(findingLevel(dispute, SCREENED_AT)).toBe("medium");
   });
 });
 
@@ -242,6 +349,18 @@ describe("isCoverageComplete", () => {
     expect(isCoverageComplete(planned, [...planned, '"Jean Martin" Lyon'], [])).toBe(true);
   });
 
+  it("recognizes a planned query run with its language tag in front", () => {
+    const tagged = ['[fr] "Jean Martin" fraude', '[en]  "Jean Martin" fraud'];
+
+    expect(isCoverageComplete(planned, tagged, [])).toBe(true);
+  });
+
+  it("does not take any other change to a planned query for the query itself", () => {
+    const changed = ['"Jean Martin" fraude [fr]', '[english] "Jean Martin" fraud'];
+
+    expect(isCoverageComplete(planned, changed, [])).toBe(false);
+  });
+
   it("is false when a planned query did not run", () => {
     expect(isCoverageComplete(planned, [planned[0] ?? ""], [])).toBe(false);
   });
@@ -250,6 +369,21 @@ describe("isCoverageComplete", () => {
     const failed = { code: "unavailable", detail: "search failed" } as const;
 
     expect(isCoverageComplete(planned, planned, [failed])).toBe(false);
+  });
+
+  it("is false when most search results came from blocked domains", () => {
+    const flooded = {
+      code: "flooded",
+      detail: "6 of 10 search results are on blocked domains",
+    } as const;
+
+    expect(isCoverageComplete(planned, planned, [flooded])).toBe(false);
+  });
+
+  it("is false when the answer reproduced the prompt canary", () => {
+    const compromised = { code: "compromised", detail: "canary" } as const;
+
+    expect(isCoverageComplete(planned, planned, [compromised])).toBe(false);
   });
 
   it("is still true when the model only went over the search budget", () => {

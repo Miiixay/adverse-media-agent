@@ -51,11 +51,14 @@ export const CATEGORIES = [
   "other",
 ] as const;
 export const SEVERITIES = ["critical", "moderate", "minor"] as const;
+// sanctioned: a final administrative or regulatory decision, such as a fine, a ban, an
+// ineligibility or a listing on a sanctions list (D-33).
 export const STATUSES = [
   "allegation",
   "investigation",
   "indictment",
   "conviction",
+  "sanctioned",
   "acquitted",
   "unclear",
 ] as const;
@@ -103,9 +106,11 @@ export type Finding = {
   sourceReliability: SourceReliability;
   summary: string;
   countedInScore: boolean;
+  // The level this finding gives the risk; null when it is not counted.
+  riskLevel: RiskLevel | null;
 };
 
-export type AssessedFinding = Omit<Finding, "countedInScore">;
+export type AssessedFinding = Omit<Finding, "countedInScore" | "riskLevel">;
 
 export type CoverageErrorCode =
   // Reported by the web search tool inside a successful response.
@@ -120,6 +125,10 @@ export type CoverageErrorCode =
   | "max_tokens"
   | "turn_paused"
   | "timeout"
+  // The answer reproduced the prompt canary: none of its assessments is trusted (D-36).
+  | "compromised"
+  // Most search results came from blocked domains: the search returned little else (D-37).
+  | "flooded"
   | "unexpected_stop_reason"
   | "invalid_output";
 
@@ -170,6 +179,9 @@ export type ScreeningResult = {
     searchesUsed: number;
     // Distinct search results the model read: tells "nothing came back" from "nothing negative".
     articlesReviewed: number;
+    // The URLs of those results, to tell whether an article was missed by the search or set aside
+    // by the model. Kept in the result only, never in the run log: URLs often carry the name.
+    urlsReviewed: string[];
     rejectedUrls: string[];
     errors: CoverageError[];
   };
