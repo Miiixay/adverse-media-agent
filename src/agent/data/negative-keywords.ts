@@ -8,11 +8,16 @@ export type KeywordCategory =
   | "terrorism"
   | "organized_crime"
   | "violence"
-  | "legal_proceedings";
+  | "legal_proceedings"
+  // Regulatory and civil matters: an inquiry, a lawsuit, a fine, a supervisor, a scandal (D-38).
+  | "regulatory_civil";
 
 // Nouns are preferred over participles in languages that inflect them by gender ("condamnation"
 // rather than "condamné" / "condamnée"), so that one term matches articles about anyone. Within an
 // offence category the most common press term comes first: it is the one the query keeps.
+// Positions carry a role the query relies on (D-39): legal_proceedings starts with the conviction
+// term, then the charge term; regulatory_civil starts with the investigation, lawsuit and scandal
+// terms, in that order.
 // Other spellings of a term, searched with it wherever the term is: British and American English
 // for the international press.
 export const SPELLING_VARIANTS: Readonly<Partial<Record<string, readonly string[]>>> = {
@@ -28,7 +33,8 @@ export const NEGATIVE_KEYWORDS: Record<Language, Record<KeywordCategory, readonl
     terrorism: ["terorismus"],
     organized_crime: ["organizovaný zločin", "mafie"],
     violence: ["napadení", "vražda"],
-    legal_proceedings: ["obvinění", "obžaloba", "odsouzení"],
+    legal_proceedings: ["odsouzení", "obvinění", "obžaloba"],
+    regulatory_civil: ["vyšetřování", "žaloba", "skandál", "pokuta", "dozor"],
   },
   da: {
     fraud: ["bedrageri", "underslæb"],
@@ -39,6 +45,7 @@ export const NEGATIVE_KEYWORDS: Record<Language, Record<KeywordCategory, readonl
     organized_crime: ["organiseret kriminalitet", "bandekriminalitet"],
     violence: ["vold", "drab"],
     legal_proceedings: ["dømt", "tiltalt", "anholdt"],
+    regulatory_civil: ["efterforskning", "retssag", "skandale", "bøde", "tilsyn"],
   },
   de: {
     fraud: ["Betrug", "Veruntreuung"],
@@ -49,6 +56,7 @@ export const NEGATIVE_KEYWORDS: Record<Language, Record<KeywordCategory, readonl
     organized_crime: ["organisierte Kriminalität", "Mafia"],
     violence: ["Körperverletzung", "Mord"],
     legal_proceedings: ["Verurteilung", "Anklage", "Ermittlungen"],
+    regulatory_civil: ["Ermittlungen", "Klage", "Skandal", "Bußgeld", "Aufsicht"],
   },
   el: {
     fraud: ["απάτη", "υπεξαίρεση"],
@@ -59,6 +67,7 @@ export const NEGATIVE_KEYWORDS: Record<Language, Record<KeywordCategory, readonl
     organized_crime: ["οργανωμένο έγκλημα", "μαφία"],
     violence: ["επίθεση", "δολοφονία"],
     legal_proceedings: ["καταδίκη", "δίωξη", "σύλληψη"],
+    regulatory_civil: ["έρευνα", "αγωγή", "σκάνδαλο", "πρόστιμο", "εποπτεία"],
   },
   en: {
     fraud: ["fraud", "embezzlement"],
@@ -69,6 +78,7 @@ export const NEGATIVE_KEYWORDS: Record<Language, Record<KeywordCategory, readonl
     organized_crime: ["organized crime"],
     violence: ["assault", "murder"],
     legal_proceedings: ["convicted", "indicted", "arrested"],
+    regulatory_civil: ["investigation", "lawsuit", "scandal", "fine", "regulator", "settlement"],
   },
   es: {
     fraud: ["fraude", "estafa"],
@@ -79,6 +89,7 @@ export const NEGATIVE_KEYWORDS: Record<Language, Record<KeywordCategory, readonl
     organized_crime: ["crimen organizado", "mafia"],
     violence: ["agresión", "asesinato"],
     legal_proceedings: ["condena", "imputación", "juicio"],
+    regulatory_civil: ["investigación", "demanda", "escándalo", "multa", "regulador"],
   },
   fi: {
     fraud: ["petos", "kavallus"],
@@ -89,6 +100,7 @@ export const NEGATIVE_KEYWORDS: Record<Language, Record<KeywordCategory, readonl
     organized_crime: ["järjestäytynyt rikollisuus", "mafia"],
     violence: ["pahoinpitely", "murha"],
     legal_proceedings: ["tuomittu", "syyte", "pidätetty"],
+    regulatory_civil: ["tutkinta", "kanne", "kohu", "sakko", "valvonta"],
   },
   fr: {
     fraud: ["fraude", "escroquerie"],
@@ -99,6 +111,7 @@ export const NEGATIVE_KEYWORDS: Record<Language, Record<KeywordCategory, readonl
     organized_crime: ["crime organisé", "mafia"],
     violence: ["agression", "meurtre"],
     legal_proceedings: ["condamnation", "mise en examen", "procès"],
+    regulatory_civil: ["enquête", "plainte", "scandale", "amende", "régulateur"],
   },
   it: {
     fraud: ["frode", "truffa"],
@@ -108,7 +121,8 @@ export const NEGATIVE_KEYWORDS: Record<Language, Record<KeywordCategory, readonl
     terrorism: ["terrorismo"],
     organized_crime: ["criminalità organizzata", "mafia"],
     violence: ["aggressione", "omicidio"],
-    legal_proceedings: ["condanna", "arresto", "processo"],
+    legal_proceedings: ["condanna", "rinvio a giudizio", "arresto", "processo"],
+    regulatory_civil: ["indagine", "causa", "scandalo", "multa", "vigilanza"],
   },
   nl: {
     fraud: ["fraude", "oplichting"],
@@ -118,7 +132,15 @@ export const NEGATIVE_KEYWORDS: Record<Language, Record<KeywordCategory, readonl
     terrorism: ["terrorisme"],
     organized_crime: ["georganiseerde misdaad", "maffia"],
     violence: ["mishandeling", "moord"],
-    legal_proceedings: ["veroordeeld", "aangehouden", "rechtszaak"],
+    legal_proceedings: ["veroordeeld", "aangeklaagd", "aangehouden", "rechtszaak"],
+    regulatory_civil: [
+      "onderzoek",
+      "rechtszaak",
+      "schandaal",
+      "boete",
+      "toezichthouder",
+      "schikking",
+    ],
   },
   no: {
     fraud: ["bedrageri", "underslag"],
@@ -129,6 +151,7 @@ export const NEGATIVE_KEYWORDS: Record<Language, Record<KeywordCategory, readonl
     organized_crime: ["organisert kriminalitet", "mafia"],
     violence: ["vold", "drap"],
     legal_proceedings: ["dømt", "tiltalt", "pågrepet"],
+    regulatory_civil: ["etterforskning", "søksmål", "skandale", "bøtelagt", "tilsyn"],
   },
   pl: {
     fraud: ["oszustwo", "defraudacja"],
@@ -139,6 +162,7 @@ export const NEGATIVE_KEYWORDS: Record<Language, Record<KeywordCategory, readonl
     organized_crime: ["przestępczość zorganizowana", "mafia"],
     violence: ["pobicie", "zabójstwo"],
     legal_proceedings: ["wyrok", "zarzuty", "zatrzymanie"],
+    regulatory_civil: ["śledztwo", "pozew", "afera", "grzywna", "nadzór", "ugoda"],
   },
   pt: {
     fraud: ["fraude", "burla"],
@@ -149,6 +173,7 @@ export const NEGATIVE_KEYWORDS: Record<Language, Record<KeywordCategory, readonl
     organized_crime: ["crime organizado", "máfia"],
     violence: ["agressão", "homicídio"],
     legal_proceedings: ["condenação", "acusação", "julgamento"],
+    regulatory_civil: ["investigação", "processo", "escândalo", "multa", "regulador"],
   },
   ro: {
     fraud: ["fraudă", "înșelăciune"],
@@ -159,6 +184,7 @@ export const NEGATIVE_KEYWORDS: Record<Language, Record<KeywordCategory, readonl
     organized_crime: ["crimă organizată", "mafie"],
     violence: ["agresiune", "omor"],
     legal_proceedings: ["condamnare", "trimitere în judecată", "arestare"],
+    regulatory_civil: ["anchetă", "proces", "scandal", "amendă", "supraveghere"],
   },
   sk: {
     fraud: ["podvod", "sprenevera"],
@@ -168,7 +194,8 @@ export const NEGATIVE_KEYWORDS: Record<Language, Record<KeywordCategory, readonl
     terrorism: ["terorizmus"],
     organized_crime: ["organizovaný zločin", "mafia"],
     violence: ["napadnutie", "vražda"],
-    legal_proceedings: ["obvinenie", "obžaloba", "odsúdenie"],
+    legal_proceedings: ["odsúdenie", "obvinenie", "obžaloba"],
+    regulatory_civil: ["vyšetrovanie", "žaloba", "škandál", "pokuta", "dohľad"],
   },
   sv: {
     fraud: ["bedrägeri", "förskingring"],
@@ -179,6 +206,7 @@ export const NEGATIVE_KEYWORDS: Record<Language, Record<KeywordCategory, readonl
     organized_crime: ["organiserad brottslighet", "gängkriminalitet"],
     violence: ["misshandel", "mord"],
     legal_proceedings: ["dömd", "åtalad", "gripen"],
+    regulatory_civil: ["utredning", "stämning", "skandal", "böter", "tillsyn"],
   },
   tr: {
     fraud: ["dolandırıcılık", "zimmet"],
@@ -189,5 +217,6 @@ export const NEGATIVE_KEYWORDS: Record<Language, Record<KeywordCategory, readonl
     organized_crime: ["organize suç", "mafya"],
     violence: ["saldırı", "cinayet"],
     legal_proceedings: ["hapis cezası", "iddianame", "gözaltı"],
+    regulatory_civil: ["soruşturma", "dava", "skandal", "para cezası", "denetim"],
   },
 };

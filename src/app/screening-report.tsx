@@ -7,6 +7,7 @@ const WEB_PROTOCOLS = new Set(["http:", "https:"]);
 export function ScreeningReport({ result }: { result: ScreeningResult }) {
   const counted = result.findings.filter((finding) => finding.countedInScore);
   const shown = result.findings.filter((finding) => !finding.countedInScore);
+  const unsourced = result.coverage.errors.find((error) => error.code === "unsourced_summary");
   return (
     <article className="report">
       <div className="verdict">
@@ -23,6 +24,12 @@ export function ScreeningReport({ result }: { result: ScreeningResult }) {
         </p>
       )}
       <p className="summary">{result.summary ?? "The model returned no usable summary."}</p>
+      {unsourced !== undefined && (
+        <p className="notice notice-warning">
+          {unsourced.detail.charAt(0).toUpperCase() + unsourced.detail.slice(1)}. A matter it
+          describes may have no finding below.
+        </p>
+      )}
 
       <h2>Findings counted in the risk ({counted.length})</h2>
       {counted.length === 0 ? (
@@ -107,6 +114,9 @@ function Coverage({ result }: { result: ScreeningResult }) {
         <Fact name="Country localized">{coverage.countrySupported ? "yes" : "no"}</Fact>
         <Fact name="Searches">{coverage.searchesUsed}</Fact>
         <Fact name="Articles read">{coverage.articlesReviewed}</Fact>
+        {coverage.aliases.length > 0 && (
+          <Fact name="Other names in the sources">{coverage.aliases.join(", ")}</Fact>
+        )}
       </dl>
       <h3>Planned queries</h3>
       <ul className="queries">
@@ -175,6 +185,7 @@ function Usage({ result }: { result: ScreeningResult }) {
         {(usage.cacheWrite5mTokens + usage.cacheWrite1hTokens).toLocaleString("en-US")} cache write,{" "}
         {usage.outputTokens.toLocaleString("en-US")} output
       </span>
+      {usage.apiCalls > 1 && <span>{usage.apiCalls} model calls, the second under an alias</span>}
       <span>Model {result.model}</span>
       <span>Prompt {result.promptVersion}</span>
       <span>{(result.durationMs / 1000).toFixed(1)} s</span>

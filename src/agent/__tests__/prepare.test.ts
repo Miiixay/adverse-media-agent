@@ -3,14 +3,18 @@ import { describe, expect, it } from "vitest";
 import { COUNTRY_LANGUAGES } from "../data/country-languages";
 import { NEGATIVE_KEYWORDS } from "../data/negative-keywords";
 import {
+  MAX_QUERY_CHARACTERS,
+  MAX_QUERY_WORDS,
   MAX_SEARCHES,
   RESERVED_FREE_SEARCHES,
   buildQueries,
   languagesFor,
   nameVariants,
   parseQueriesPerLanguage,
+  withinQueryLimits,
   prepare,
 } from "../prepare";
+import type { Language } from "../types";
 
 describe("languagesFor", () => {
   it("adds English after the national press language", () => {
@@ -64,10 +68,57 @@ describe("buildQueries", () => {
     expect(languages).toEqual(["fr", "en"]);
   });
 
-  it("keeps the first term of each offence category and every proceedings term", () => {
+  it("repeats the name in every clause, terms in order of priority", () => {
     expect(buildQueries("Jean Martin", ["fr"]).map((query) => query.text)).toEqual([
-      `"Jean Martin" fraude OR blanchiment OR corruption OR sanctions OR terrorisme OR "crime organisé" OR agression OR condamnation OR "mise en examen" OR procès`,
+      `"Jean Martin" fraude OR "Jean Martin" blanchiment OR "Jean Martin" corruption OR "Jean Martin" sanctions OR "Jean Martin" condamnation OR "Jean Martin" "mise en examen" OR "Jean Martin" enquête OR "Jean Martin" plainte OR "Jean Martin" scandale`,
     ]);
+  });
+
+  it("keeps nine clauses in every language for a short name, each within the limits", () => {
+    for (const language of Object.keys(NEGATIVE_KEYWORDS) as Language[]) {
+      const [query] = buildQueries("Jean Martin", [language]);
+      const clauses = query?.text.split(" OR ") ?? [];
+
+      expect(clauses, language).toHaveLength(9);
+      expect(
+        clauses.every((clause) => clause.startsWith('"Jean Martin" ')),
+        language,
+      ).toBe(true);
+      expect(new Set(clauses).size, language).toBe(clauses.length);
+      expect(withinQueryLimits(query?.text ?? ""), language).toBe(true);
+    }
+  });
+
+  it("drops the last clauses of the longest fixture name to stay within the limits", () => {
+    const [german, english] = buildQueries("Friederike Wenzlaff-Obermaier", ["de", "en"]);
+
+    expect(german?.text.split(" OR ")).toHaveLength(8);
+    expect(german?.text).not.toContain("Skandal");
+    expect(english?.text.split(" OR ").at(-1)).toBe('"Friederike Wenzlaff-Obermaier" lawsuit');
+    expect(english?.text.length).toBeLessThanOrEqual(MAX_QUERY_CHARACTERS);
+  });
+
+  it("stays within the limits in every language for the longest name the input allows", () => {
+    const name = `${"A".repeat(50)} ${"B".repeat(50)}`;
+    for (const language of Object.keys(NEGATIVE_KEYWORDS) as Language[]) {
+      const [query] = buildQueries(name, [language]);
+
+      expect(withinQueryLimits(query?.text ?? ""), language).toBe(true);
+      expect(query?.text.startsWith(`"${name}" `), language).toBe(true);
+    }
+  });
+
+  it("keeps the first clause alone when the name leaves no room for a second", () => {
+    const name = Array.from({ length: 40 }, () => "Al").join(" ");
+    const [query] = buildQueries(name, ["en"]);
+
+    expect(query?.text).toBe(`"${name}" fraud`);
+  });
+
+  it("counts words and characters against both limits", () => {
+    expect(withinQueryLimits("a ".repeat(MAX_QUERY_WORDS).trim())).toBe(true);
+    expect(withinQueryLimits("a ".repeat(MAX_QUERY_WORDS + 1).trim())).toBe(false);
+    expect(withinQueryLimits("a".repeat(MAX_QUERY_CHARACTERS + 1))).toBe(false);
   });
 });
 
@@ -119,19 +170,19 @@ describe("search budget", () => {
 
 describe("spelling variants", () => {
   it("searches the British and American spellings together", () => {
-    expect(buildQueries("David Smith", ["en"])[0]?.text).toContain(
-      `"organized crime" OR "organised crime"`,
+    expect(buildQueries("David Smith", ["en"], 2)[1]?.text).toContain(
+      `"David Smith" "organized crime" OR "David Smith" "organised crime"`,
     );
   });
 });
 
 describe("queries per language switch", () => {
-  it("replays the two v1 queries per language word for word", () => {
+  it("keeps the two v1 groups per language, with the name repeated in every clause", () => {
     expect(buildQueries("Jean Martin", ["fr", "en"], 2).map((query) => query.text)).toEqual([
-      `"Jean Martin" fraude OR escroquerie OR blanchiment OR corruption OR pots-de-vin OR sanctions`,
-      `"Jean Martin" terrorisme OR "crime organisé" OR mafia OR agression OR meurtre OR condamnation OR "mise en examen" OR procès`,
-      `"Jean Martin" fraud OR embezzlement OR "money laundering" OR corruption OR bribery OR sanctions`,
-      `"Jean Martin" terrorism OR "organized crime" OR "organised crime" OR assault OR murder OR convicted OR indicted OR arrested`,
+      `"Jean Martin" fraude OR "Jean Martin" escroquerie OR "Jean Martin" blanchiment OR "Jean Martin" corruption OR "Jean Martin" pots-de-vin OR "Jean Martin" sanctions`,
+      `"Jean Martin" terrorisme OR "Jean Martin" "crime organisé" OR "Jean Martin" mafia OR "Jean Martin" agression OR "Jean Martin" meurtre OR "Jean Martin" condamnation OR "Jean Martin" "mise en examen" OR "Jean Martin" procès`,
+      `"Jean Martin" fraud OR "Jean Martin" embezzlement OR "Jean Martin" "money laundering" OR "Jean Martin" corruption OR "Jean Martin" bribery OR "Jean Martin" sanctions`,
+      `"Jean Martin" terrorism OR "Jean Martin" "organized crime" OR "Jean Martin" "organised crime" OR "Jean Martin" assault OR "Jean Martin" murder OR "Jean Martin" convicted OR "Jean Martin" indicted OR "Jean Martin" arrested`,
     ]);
   });
 

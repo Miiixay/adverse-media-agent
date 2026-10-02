@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { screeningInputSchema } from "../schema";
+import { ASSESSMENT_JSON_SCHEMA, AssessmentSchema, screeningInputSchema } from "../schema";
 
 describe("screeningInputSchema", () => {
   it("accepts names with diacritics, hyphens, apostrophes and spaces", () => {
@@ -94,5 +94,44 @@ describe("screeningInputSchema", () => {
         country,
       ).toBe(false);
     }
+  });
+});
+
+describe("ASSESSMENT_JSON_SCHEMA", () => {
+  // Constrained decoding writes required properties in schema order (D-44).
+  it("asks for the findings, then the summary, then the aliases", () => {
+    expect(Object.keys(ASSESSMENT_JSON_SCHEMA.properties)).toEqual([
+      "findings",
+      "summary",
+      "aliases",
+    ]);
+    expect(ASSESSMENT_JSON_SCHEMA.required).toEqual(Object.keys(ASSESSMENT_JSON_SCHEMA.properties));
+  });
+});
+
+describe("AssessmentSchema", () => {
+  const finding = {
+    url: "https://fr.wikipedia.org/wiki/Example",
+    corroboratingUrls: [],
+    language: "fr",
+    date: null,
+    subject: "person",
+    category: "fraud",
+    severity: "critical",
+    status: "conviction",
+    identityConfidence: "high",
+    identityEvidence: ["Same name and country"],
+    sourceReliability: "encyclopedia",
+    summary: "Convicted of fraud.",
+  };
+
+  it("accepts an encyclopedia as a source and requires the aliases, even empty", () => {
+    expect(
+      AssessmentSchema.safeParse({ findings: [finding], summary: "One matter." }).success,
+    ).toBe(false);
+    expect(
+      AssessmentSchema.safeParse({ findings: [finding], summary: "One matter.", aliases: [] })
+        .success,
+    ).toBe(true);
   });
 });

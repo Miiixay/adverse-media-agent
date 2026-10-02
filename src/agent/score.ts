@@ -29,11 +29,16 @@ const MODERATE_CATEGORIES: ReadonlySet<Category> = new Set([
   "controversy",
   "violence",
 ]);
+// Statuses of a matter that no authority has decided or charged.
+const UNDECIDED: ReadonlySet<Status> = new Set(["allegation", "unclear"]);
 // A final decision against the person, by a court or by an administrative or regulatory body.
 const FINAL_DECISIONS: ReadonlySet<Status> = new Set(["conviction", "sanctioned"]);
 const RELIABLE_SOURCES: ReadonlySet<SourceReliability> = new Set(["official", "national_press"]);
 // Going over the search budget means the model wanted more searches, not that a planned one failed.
-const NON_BLOCKING_ERRORS: ReadonlySet<CoverageErrorCode> = new Set(["max_uses_exceeded"]);
+const NON_BLOCKING_ERRORS: ReadonlySet<CoverageErrorCode> = new Set([
+  "max_uses_exceeded",
+  "unsourced_summary",
+]);
 // Second levels under which a two-letter country domain names an organization: "bbc.co.uk".
 const GENERIC_SECOND_LEVELS: ReadonlySet<string> = new Set([
   "ac",
@@ -100,13 +105,28 @@ export function findingLevel(finding: AssessedFinding, screenedAt: Date): RiskLe
   if (finding.severity === "minor" && isOlderThan(finding.date, OLD_YEARS, screenedAt)) {
     return "low";
   }
+  // A civil, regulatory or reputational claim that led to no decision within two years (D-40).
+  if (
+    MODERATE_CATEGORIES.has(finding.category) &&
+    UNDECIDED.has(finding.status) &&
+    isOlderThan(finding.date, RECENT_YEARS, screenedAt)
+  ) {
+    return "low";
+  }
 
   const base = baseLevel(finding);
   const raised = modulatorCount(finding, screenedAt) >= MODULATORS_TO_RAISE ? next(base) : base;
+  // High is kept for critical categories and final decisions: modulators make a civil or
+  // regulatory matter more credible, not graver (D-40). An allegation alone, which no authority has
+  // taken up, stays below high in any category, however widely it is reported (D-43).
+  const graveEnough =
+    (CRITICAL_CATEGORIES.has(finding.category) || FINAL_DECISIONS.has(finding.status)) &&
+    finding.status !== "allegation";
+  const capped = graveEnough ? raised : lower(raised, "medium");
   // Modulators make the facts more credible, not the identity: only a high identity reaches high.
   // A matter of an organization the person leads does not establish their own part in it (D-34).
   const personal = finding.identityConfidence === "high" && finding.subject !== "organization";
-  return personal ? raised : lower(raised, "medium");
+  return personal ? capped : lower(capped, "medium");
 }
 
 export function isCorroborated(

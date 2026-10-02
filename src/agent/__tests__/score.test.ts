@@ -140,14 +140,14 @@ describe("statuses", () => {
     expect(findingLevel(finding({ status: "allegation" }), SCREENED_AT)).toBe("medium");
   });
 
-  it("raises that allegation to high when two modulators hold", () => {
+  it("keeps that allegation at medium even when two modulators hold (D-43)", () => {
     const corroboratedAllegation = finding({
       status: "allegation",
       date: "2026-03-01",
       sourceReliability: "official",
     });
 
-    expect(findingLevel(corroboratedAllegation, SCREENED_AT)).toBe("high");
+    expect(findingLevel(corroboratedAllegation, SCREENED_AT)).toBe("medium");
   });
 
   it("keeps every official step in a critical category high, and an unclear status too", () => {
@@ -265,16 +265,90 @@ describe("subject", () => {
       category: "civil_litigation",
       status: "allegation",
       severity: "minor",
+      date: "2026-03-01",
     });
 
     expect(findingLevel(dispute, SCREENED_AT)).toBe("medium");
   });
 });
 
+describe("moderate categories (D-40)", () => {
+  const credible: Partial<AssessedFinding> = {
+    date: "2026-03-01",
+    sourceReliability: "national_press",
+    corroboratingUrls: [LE_FIGARO],
+  };
+
+  it("stay at medium whatever the modulators, short of a final decision", () => {
+    for (const category of ["civil_litigation", "regulatory", "controversy", "violence"] as const) {
+      expect(findingLevel(finding({ ...credible, category }), SCREENED_AT), category).toBe(
+        "medium",
+      );
+    }
+  });
+
+  it("still reach high on a final decision", () => {
+    expect(
+      findingLevel(
+        finding({ ...credible, category: "regulatory", status: "sanctioned" }),
+        SCREENED_AT,
+      ),
+    ).toBe("high");
+    expect(
+      findingLevel(
+        finding({ ...credible, category: "violence", status: "conviction" }),
+        SCREENED_AT,
+      ),
+    ).toBe("high");
+  });
+
+  it("fall to low for an allegation or an unclear status older than two years", () => {
+    for (const status of ["allegation", "unclear"] as const) {
+      const old = finding({ ...credible, category: "civil_litigation", status, date: "2023-03" });
+
+      expect(findingLevel(old, SCREENED_AT), status).toBe("low");
+    }
+  });
+
+  it("keep their level when the claim is recent, undated or went further than an allegation", () => {
+    const claim = { ...credible, category: "civil_litigation" } as const;
+
+    expect(
+      findingLevel(finding({ ...claim, status: "allegation", date: "2025-06" }), SCREENED_AT),
+    ).toBe("medium");
+    expect(findingLevel(finding({ ...claim, status: "allegation", date: null }), SCREENED_AT)).toBe(
+      "medium",
+    );
+    expect(
+      findingLevel(finding({ ...claim, status: "investigation", date: "2019" }), SCREENED_AT),
+    ).toBe("medium");
+  });
+
+  it("share with every category the cap on allegations (D-43)", () => {
+    for (const category of [
+      "fraud",
+      "money_laundering",
+      "regulatory",
+      "civil_litigation",
+    ] as const) {
+      const allegation = finding({ ...credible, category, status: "allegation" });
+
+      expect(findingLevel(allegation, SCREENED_AT), category).toBe("medium");
+    }
+  });
+});
+
 describe("modulators", () => {
+  // A minor final sanction starts at medium and may reach high: the case where modulators count.
+  const minorSanction = {
+    category: "regulatory",
+    status: "sanctioned",
+    severity: "minor",
+  } as const;
+
   it("raise a finding one level when two of them hold", () => {
     const recentOfficial = finding({
-      category: "regulatory",
+      ...minorSanction,
       date: "2026-03-01",
       sourceReliability: "official",
     });
@@ -290,7 +364,7 @@ describe("modulators", () => {
 
   it("count corroboration by another publication as one of them", () => {
     const corroborated = finding({
-      category: "regulatory",
+      ...minorSanction,
       sourceReliability: "national_press",
       corroboratingUrls: [LE_FIGARO],
     });
@@ -310,10 +384,30 @@ describe("modulators", () => {
   });
 
   it("read a partial date at the end of its period", () => {
-    const official = { category: "regulatory", sourceReliability: "official" } as const;
+    const official = { ...minorSanction, sourceReliability: "official" } as const;
 
     expect(findingLevel(finding({ ...official, date: "2024" }), SCREENED_AT)).toBe("high");
     expect(findingLevel(finding({ ...official, date: "2024-09" }), SCREENED_AT)).toBe("medium");
+  });
+});
+
+describe("encyclopedia sources (D-44)", () => {
+  it("weigh like unknown sources: not a reliability modulator", () => {
+    const sourced = (sourceReliability: AssessedFinding["sourceReliability"]) =>
+      findingLevel(
+        finding({
+          category: "regulatory",
+          status: "sanctioned",
+          severity: "minor",
+          date: "2026-03-01",
+          sourceReliability,
+        }),
+        SCREENED_AT,
+      );
+
+    expect(sourced("official")).toBe("high");
+    expect(sourced("encyclopedia")).toBe("medium");
+    expect(sourced("unknown")).toBe("medium");
   });
 });
 

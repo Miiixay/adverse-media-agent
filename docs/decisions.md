@@ -84,6 +84,28 @@ its retirement commitment ends on 2026-10-15.
 Consequences: decided by measurement, final numbers in `docs/evaluation.md`. Sonnet 5.5 rejects
 a non-default `temperature`, assistant prefill and a forced `tool_choice`, so the request relies
 on `tool_choice: auto` and structured outputs.
+Measured on 2026-10-02 (`logs/comparison.md`): `MODEL=claude-opus-5-5` replays the fixtures on Opus
+5.5, at the same effort and with the same prices in `cost.ts`. Opus with prompt v13 against Sonnet
+with v12, on the five fixed cases, Jobs and Mouly, one query per language and one run each. The two
+prompts differ by the definition of `investigation`, which bears on none of the points below.
+
+- Risk: the same seven levels.
+- Counted findings: 10 and 10. Opus adds a November 2025 investigation into Valérie Bozzi's circle,
+  and reports a relative of Madoff and one of Bozzi as associates, uncounted; Mouly's
+  money-laundering investigation does not come back as a finding.
+- Alias: Opus searched "Marco Mouly" itself, in two free searches, so the code's second turn did
+  not run. Sonnet ran no free search in any case, and Madoff's nickname went to the code's second
+  turn under both models.
+- Wikipedia: Rennes 2026 is a finding under both; Opus's summary adds two suspended sentences, from
+  1993 and 2019, without a finding for either.
+- Dates: Opus dated Held's conviction to its finality, April 2023, which no Sonnet run had found
+  (2021, 2021-09, 2022), and Mouly's matters to the day and to their latest stage. Madoff's
+  conviction moved from the sentence to the plea, as it already does between Sonnet runs.
+- Cost: $0.5741 to $1.1767 for the seven cases (+105%), $0.082 to $0.168 per screening; durations
+  up to 34 s instead of 17 s.
+
+The criterion set beforehand, two of four points improved without a change of risk, is met on the
+alias and the dates, with the Wikipedia matters improved in the summary only.
 
 ### D-15 — Modular monolith now, isolated worker later; the boundary is one JSON contract
 
@@ -481,3 +503,290 @@ codes, so the condition can be checked without names.
 Consequences: five tests in `search.test.ts` and one in `score.test.ts`. On the five fixed cases,
 run once: 5/5, Wikipedia back with 22 URLs, as many as before the list, no URL rejected, no
 `flooded`.
+
+### D-38 — Regulatory and civil terms in the merged query
+
+Context: the query of each language held only criminal vocabulary: the first term of each offence
+category and the proceedings terms. Regulatory and civil matters, which the categories `regulatory`
+and `civil_litigation` are there to report, were found only when an article also used a criminal
+word. Two real cases showed it, among them the SEC investigation of Apple's option backdating,
+which named Steve Jobs and did not come back in nine URLs.
+Options: (a) a third group of terms per language, appended to the merged query; (b) a separate
+regulatory and civil query per language, one more search each; (c) terms tied to each regulator,
+such as SEC, FCA or BaFin.
+Decision: (a). Each language gets four to six terms for an inquiry, a lawsuit, a fine, a supervisor,
+a settlement where the word is unambiguous, and a scandal; a term already among the proceedings terms
+is not repeated (`procès` in French, `Ermittlungen` in German, `rechtszaak` in Dutch). German uses
+`Bußgeld`, the word of BaFin decisions and of the press, rather than `Geldbuße`. The two-query plan
+replayed by `QUERIES_PER_LANGUAGE=2` is unchanged.
+Reasons: no extra search and no extra cost; (b) would add a search per language, (c) does not scale
+to seventeen languages and their regulators.
+Consequences: the documentation of the search tool gives no maximum query length. The longest query,
+English, grows from 174 to 248 characters and 38 words with a 14-letter name; none of the 17 cases
+run returned `query_too_long`, and every case carries the English query. Measured on 2026-10-01
+(`logs/comparison.md`): no risk changed on the fifteen earlier cases and every one passes; findings
+not counted did not grow. The Jobs case still fails: on a famous name, the longer OR list brings
+back pages about the terms themselves, because the quoted name does not bind them, and the model
+used no free search to recover. The vocabulary widens recall where the name is rare; it does not
+fix a famous name drowned by generic pages.
+
+### D-39 — The name is repeated in every clause of the query
+
+Context: the Steve Jobs case still missed the SEC backdating matter after D-38. Three probes of the
+search tool, one query each (`docs/evaluation.md`, "Search engine query semantics"), showed that the
+engine binds a quoted name only to the term that follows it: `"Name" a OR b OR c` reads as
+`("Name" a) OR b OR c`. The agent's queries were unions of clauses without the name, and on a famous
+name the clauses without it brought back pages about the terms. Grouping the terms in parentheses
+changed nothing.
+Options: (a) repeat the name in every clause, `"Name" t1 OR "Name" t2 ...`, with fewer clauses to
+stay within the query limits; (b) one query per term, several searches per language; (c) keep the
+form and rely on free searches.
+Decision: (a). One query per language, clauses added in order of priority while the query stays
+within 380 characters and 48 words: the first term of fraud, money laundering, corruption and
+sanctions; the conviction and charge terms; the investigation, lawsuit and scandal terms. A long
+name keeps fewer clauses; the first clause stays whatever its length. The keyword table carries the
+roles by position, and three terms were added for them: `rinvio a giudizio` (Italian charge),
+`aangeklaagd` (Dutch charge), `Ermittlungen` (German investigation). The two-query plan replayed by
+`QUERIES_PER_LANGUAGE=2` keeps its two groups in the same repeated form.
+Reasons: every clause then targets the person, at the cost of one search per language as before;
+(b) multiplies searches, (c) spends the reserved searches on what the plan should do. The limits stay
+under both figures found for the engine's query: 600 characters and 75 words in Brave's API
+reference, 400 and 50 in older documentation; Anthropic documents `query_too_long` without a figure.
+Reserve: terrorism, organised crime and violence are no longer searched as terms. A case in those
+reaches the press through the conviction and charge terms, which are kept; an allegation in those
+fields that has not reached a charge may be missed.
+Consequences: the longest fixture name, Friederike Wenzlaff-Obermaier, keeps 8 of 9 clauses; the
+Turkish query of Mehmet Hakan Atilla uses 47 of 48 words. Measured on 2026-10-01 together with
+prompt v8, which allows a targeted free search (`logs/comparison.md`): the Jobs case finds the
+backdating matter through the planned query alone, as a shareholder class action, but is rated high
+where its fixture expects low; the Mouly case finds its two verified matters and loses a third,
+reported by an encyclopedia only.
+
+### D-40 — High is kept for critical categories and final decisions
+
+Context: once D-39 found the Steve Jobs matters, the case came out high on two civil claims: a 2007
+shareholder class action over the option backdating and the no-poach antitrust case, both
+`civil_litigation` at status `allegation`. Two modulators, a reliable source and corroboration,
+raised each from medium to high. A civil claim never decided weighed like a criminal charge, and
+kept its weight for twenty years.
+Options: (a) keep the grid; (b) cap moderate categories at medium and let old undecided claims fall
+to low; (c) never count civil claims.
+Decision: (b). High is reserved for critical categories and for final decisions (`conviction`,
+`sanctioned`): modulators no longer take any other finding above medium. A finding of a moderate
+category (`civil_litigation`, `regulatory`, `controversy`, `violence`) at status `allegation` or
+`unclear`, dated more than `RECENT_YEARS` before the screening, is low.
+Reasons: modulators measure how credible the facts are, not how grave; a claim nobody decided within
+two years is history for an analyst, not a live risk. A regulatory sanction or a conviction keeps
+reaching high in any category, and a recent claim stays visible at medium.
+Consequences: five tests in `score.test.ts`, four earlier tests moved to a critical category, and
+`PLAN.md` section 4. Replayed on the archived D-39 results, two levels change: the Jobs findings, then
+undated, go from high to medium, and the JPMorgan suit against Jes Staley, dated 2023, from high to
+low; no other risk changes. An undated claim stays at medium, since a missing date is neither recent
+nor old: the Jobs case is low only when the model dates its findings, as it did in the run of
+2026-10-01 (2007 and 2014).
+
+### D-41 — Output schema ordered aliases, findings, summary: tried and rejected
+
+Context: under constrained decoding, required properties are written in the order of the schema
+(structured outputs documentation). The summary came first, and the Mouly runs showed summaries
+naming matters that had no finding, against the prompt.
+Tried: findings first and the summary last, with an `aliases` field first for the other names the
+sources use; within a finding, identity evidence before identity confidence and the facts before the
+summary; prompt `v10` with "Write the findings first; the summary describes the findings listed."
+Measured once on 2026-10-01 on the five fixed cases, Jobs and Mouly (`logs/comparison.md`):
+
+- the homonym case ran to the 8,000-token output cap and returned no assessment, cause not
+  established, the result keeping no raw text;
+- Mouly was not improved: one finding instead of two, and a summary still citing four matters
+  without a finding, which it said rested on an encyclopedia only;
+- Jobs proved unstable: the class action came back as `fraud`, undated, and high, where the run
+  before had it as `civil_litigation`, dated, and low.
+  The other cases were unchanged. The field order cannot steer the searches anyway, since the JSON is
+  written after them: the alias Marco was recognized and not searched.
+  Decision: rejected. The schema keeps the summary first and prompt `v9` is restored. The instability
+  of the Jobs label led to D-43.
+
+### D-43 — An allegation alone stays below high
+
+Context: D-40 kept high for critical categories, where an allegation alone still reached high on
+two modulators (D-32). In the D-41 run, the Steve Jobs shareholder class action came back as `fraud`
+at status `allegation`, undated, and two modulators made the case high; the run before had the same
+matter as `civil_litigation`, and low. The risk turned on a label the model sets differently from
+one run to the next.
+Options: (a) keep D-32; (b) cap a finding at status `allegation` at medium, whatever its category
+and modulators.
+Decision: (b).
+Reasons: an allegation is a claim no authority has taken up; however many outlets repeat it, it is a
+reason to look, not a high risk. Any official step, from investigation to final decision, still
+reaches high in a critical category (D-32), and a final decision in any category (D-40).
+Consequences: the allegation and modulator tests in `score.test.ts` now use a minor final sanction
+to show modulators at work, and a test checks the cap in four categories; `PLAN.md` section 4.
+Replayed without any API call: nothing changes on the D-39 and D-40 archives beyond D-40 itself; on
+the D-41 run, the Jobs class action goes from high to medium. It falls to low only as a moderate
+category with a date over two years old (D-40), as in the D-40 run; labelled `fraud`, it stays at
+medium.
+
+### D-44 — Findings, then summary, then aliases; encyclopedias named as a source
+
+Context: D-41 put `aliases` first and the summary last; the homonym case then ran to the output cap,
+and Mouly's Wikipedia-only matters stayed in the summary. One change per hypothesis this time.
+Decision: the root of the output schema is written findings, summary, aliases: the summary follows
+the findings it should describe, and the aliases come last, described as other names the sources use
+for the screened person only, never for namesakes, at most three, usually empty. The list is cut to
+three in `search.ts`, since the grammar cannot bound an array, and carried into
+`coverage.aliases`: a name the search did not query. `encyclopedia` joins the `sourceReliability`
+values; the prompt asks for it instead of `unknown` for an encyclopedia-only matter, and the grid
+weighs it like `unknown`, not as a reliable source. Prompt `v10` adds "Write the findings first; the
+summary describes the findings listed."
+Consequences: measured on 2026-10-01 on homonym, Mouly and Jobs, one run each
+(`logs/comparison.md`): homonym is low with its two namesakes and no runaway output, no alias; Mouly
+has his alias, `Marco Mouly`, and one Wikipedia-only matter as a finding, but his insolvency
+conviction and another Wikipedia-only matter remain in the summary only; Jobs is medium, the class
+action labelled `fraud` again. Stored screenings from before have no aliases and read as an empty
+list.
+
+### D-42 — A second search turn under an alias
+
+Context: the sources name Mardoché Mouly "Marco Mouly"; with the name bound to every clause (D-39),
+pages that give only the alias never match, and his 2024 insolvency conviction was missed in every
+run. The model reports the other names in `aliases` (D-44) but does not search them.
+Options: (a) leave alias searches to free searches (prompt v9), which the model did not run; (b) a
+second turn in code when the first alias was not queried; (c) an alias field in the input.
+Decision: (b). When `coverage.aliases` is not empty and no executed query contains the first alias,
+`index.ts` runs `searchAdverseMedia` again on a plan built from the alias, same country and so same
+languages, within the remaining time budget, and only with at least 60 s left. One alias. The alias
+is validated like a name typed in the form before it reaches the prompt: it comes from the model,
+which read web pages. The two outcomes are merged: queries, errors, usage and calls are added,
+`usage.apiCalls` is 2, and the coverage lists both plans. A second-turn finding is dropped when its
+URL is already reported; when it has the same category, status and year as a first-turn finding,
+it is taken for the same matter and its URL joins that finding's corroborating URLs, beyond the
+usual cap of three. The same holds for two stages of one matter, same category and year, statuses
+along allegation, investigation, indictment, then a final outcome: the finding at the later stage is
+kept and the other URL joins its corroborating URLs. Two final outcomes, or a status with no stage
+(`unclear`), are never matched. An undated finding is never matched either.
+Reasons: the search is cheap next to a missed conviction; code decides when to search again, the
+model only says which names the sources use. (c) would be the target, where an analyst knows the
+aliases.
+Consequences: measured on 2026-10-01 (`logs/comparison.md`): Mouly gains his insolvency conviction
+and a money-laundering investigation, for $0.171 instead of $0.08. Two limits showed. The merge by
+URL keeps one matter twice when the two turns cite it from different URLs (Mouly's carbon tax,
+Madoff's conviction). And a well-known nickname triggers the second turn for nothing: "Bernie
+Madoff" almost doubled the cost of the Madoff case and added a duplicate. The merge on category,
+status and year now folds such duplicates. The trigger on a well-known nickname is left as it is:
+about $0.04 more for a famous person known by a short name, the price of not missing an alias like
+Mouly's. On the full regression of 2026-10-01, the second turn ran on five of seventeen cases: a
+nickname, a full legal name, a maiden name, a spelling variant and Mouly's alias. It changed no
+risk and gained three matters: Staley's 2018 FCA fine, a third indictment of Daniela Santanchè and
+Mouly's money-laundering investigation. It raised the cost of the seventeen cases by 34%, the
+costliest case reaching $0.24: accepted. Since then, an alias holding both the first and the last
+name entered, compared word by word without case or accents, starts no second turn; replayed on that
+run, the rule alone skips none of the five, since "James Edward Staley" does not hold "Jes". Prompt
+v12 narrows the aliases to names the sources use instead of the legal name, excluding longer legal
+forms and maiden names. Measured on the full regression under v12, the same day: Santanchè no
+longer lists her maiden name, Staley still lists his longer legal form; four second turns instead
+of five, the same seventeen risks, 7% less in cost.
+
+### D-45 — A warning when the summary cites years no finding is dated in
+
+Context: summaries kept describing matters that had no finding, against the prompt (D-41, D-44).
+Decision: `summary-check.ts` lists the four-digit years of the summary that no finding is dated in;
+when there are some, `coverage.errors` gets `unsourced_summary`, "the summary mentions years without a dated finding", with those years. It is a warning: it
+does not make the coverage incomplete, and the page shows it next to the summary.
+Reasons: a deterministic check that needs no extra call, and points the analyst to the matter to
+look for in the sources.
+Consequences: on the run of 2026-10-01 it named 2022 for Mouly, a matter cited without a finding,
+and 2008 and 2021 for Madoff, the years of his arrest and death: years of context raise it as well.
+
+### D-46 — Reading a page in full when its extract leaves a status or a date open: tried and rejected
+
+Context: a search result gives the model a title and a short extract. When the extract does not
+say where a matter stands or when, the finding comes back `unclear` or undated, and the grid cannot
+age it: the Jobs class action stayed undated in most runs (D-40).
+Tried: the web fetch tool, `web_fetch_20260318`, in the search turn, with `max_uses` 3,
+`max_content_tokens` 8,000, `allowed_callers: ["direct"]`, `url_sources` limited to the web search
+results so that a link planted in a page read could not be followed, and the blocked domains that
+have no path. A page read in full was not a source: findings still cited search results only, the
+pages read were listed in the coverage, and a failed read was a warning. The tool has no fee; the
+pages are billed as input tokens. Prompt `v13` added: "When a search extract attributes a matter to
+the person but does not establish its status or the date of that status, read that page in full
+with the web fetch tool. Read at most three pages, web pages only, never a PDF." Alternatives left
+aside: a second call, decided by code, reading the pages of undated or `unclear` findings; dynamic
+filtering, which nests the results under code execution and cost 14% more on search (D-17).
+Criterion set beforehand: statuses or dates corrected on at least two cases, and a mean cost under
++25%. Measured once on 2026-10-01 on the five fixed cases, Mouly, Jobs, regulator and investigation,
+against the `v12` run of the same day (`logs/comparison.md`):
+
+- one page read in nine cases, the FCA final notice on Staley, a PDF, which the prompt excluded and
+  `max_content_tokens` does not cut: about 18,000 more tokens, +27% on that case, and no date made
+  more precise;
+- undated findings remained, two for Mouly and Staley's civil claim, without the model reading
+  their page; every other change of status or date came without a read, from run-to-run variation;
+- the nine cases passed with the same risks except Jobs, medium to low on a date found without a
+  read; the cost rose by 4.2%, the tool definition adding about 2,000 tokens to the cached prefix
+  of every screening.
+
+Decision: rejected, the criterion is not met. The code returns to its state before the trial and
+prompt `v12` is restored. The API accepted `url_sources`, which appears in the SDK types and
+changelog (0.130.0) but not on the tool's documentation page.
+
+### D-47 — A second call, decided by code, to settle dates and statuses: planned, not implemented
+
+Context: the date and the status of a finding come from a search extract, and they move between
+runs on the same article. The Justice Department release on Madoff was dated 2009-06-29 in one run
+and 2009-03-12 in the next. The article on Mouly's money-laundering investigation, the same URL
+each time, was dated 2023-06, then 2024-06, then left undated, over three runs on 2026-10-01.
+Leaving the reading of pages to the model failed: in nine cases it read one page, a PDF it was told
+not to read, and left the undated findings unread (D-46).
+Planned: after the search turn, code picks the counted findings that are undated or `unclear`, the
+highest level first, at most three, and leaves out URLs ending in `.pdf`. A second call, with the
+web fetch tool only (`max_uses` 3, `max_content_tokens` 8,000, `allowed_callers: ["direct"]`,
+`url_sources` limited to the URLs of the user message), receives these URLs as data. It returns, for
+each, the status and the date of that status as the page states them, or null. Code applies them to
+the finding of that URL only. It changes neither the URL, nor the category, nor the identity, and
+adds no finding; a page that settles nothing leaves the finding as it was. A failed read is a
+warning, and the coverage stays complete.
+Alternatives: reading at the model's discretion in the search turn (D-46, rejected). Reading the
+page of every counted finding, which would steady dated findings as well, but adds a call and up to
+three pages to most screenings. A second call without fetch, re-reading the extracts, which hold no
+more than they did the first time.
+Reasons: code decides when and what to read, so the cost is bounded and paid only when a finding is
+open: one call, at most 24,000 input tokens of pages. Leaving out URLs ending in `.pdf` keeps the
+case `max_content_tokens` does not cut out of the reads (D-46), without a guarantee: a PDF served
+under another URL still passes.
+Limits: the trigger misses a dated finding whose date varies, like the Madoff release or the Mouly
+article dated twice. Within one run, code cannot tell a steady date from an unsteady one.
+Status: not implemented. To be measured against the criterion of D-46 before adoption: statuses or
+dates corrected on at least two cases, and a mean cost under +25%.
+
+### D-48 — Search operators `inpage:`, `intitle:`, `after:` and `lang:`: measured, not adopted
+
+Context: repeating the name in every clause (D-39) spends most of the 380 characters and 48 words a
+query may hold, so a query keeps at most nine clauses. An operator applying the name to the whole
+query would free that room, and a date operator would let the daily re-screening look at recent
+articles only.
+Tried: five probes on 2026-10-02, with the method of D-39 (`logs/probe-operators.mts`): one search,
+the query run exactly as written, checked in the tool call, and the model classifying each result
+from its extract. One run per probe, $0.26 in all. Probes 1 to 3 are localized to the United States,
+4 and 5 to France.
+
+| probe                                                                        | about the person               | name in title           | backdating | off-topic                                           |
+| ---------------------------------------------------------------------------- | ------------------------------ | ----------------------- | ---------- | --------------------------------------------------- |
+| (1) `inpage:"Steve Jobs" fraud OR "money laundering" OR ... OR scandal`      | 5 of 9                         | 4                       | 1          | 3, and Holmes as "the female Steve Jobs"            |
+| (2) the same with `intitle:`                                                 | 5 of 9, 8 URLs shared with (1) | 5                       | 2          | the same 3, and Holmes                              |
+| (3) control, `"Steve Jobs" fraud OR "Steve Jobs" investigation OR ...`       | 9 of 9, 1 URL shared           | 7                       | 3          | 0                                                   |
+| (4) `inpage:"Mardoché Mouly" lang:fr fraude OR escroquerie OR ... OR procès` | 4 of 9                         | 4, all as "Marco Mouly" | n/a        | 5 pages of one site on financial cases in Mauritius |
+| (5) `"Marco Mouly" condamnation after:2025-01-01`                            | 2 of 9                         | 1                       | n/a        | 7, namesakes and footballers named Marco            |
+
+- `inpage:` and `intitle:` bind like a quoted name, to the first clause only: the other clauses
+  search alone and bring back Steve Madden, a corruption scandal in San Francisco and a Justice
+  Department release on another chief executive. Probes 1 and 2 return almost the same results, and
+  fall below the control on every count. The sources of 1 and 2: five press articles, three
+  encyclopedia pages and one official release each; the control returns nine press articles.
+- `after:` does not filter by publication date, since a TV episode of November 2022 came back, and
+  the result set collapsed: no press article on the 2025 conviction.
+- `lang:fr`: the nine pages of probe 4 are in French, but the query was also localized to France,
+  as the agent's national queries are. Without a control, its effect is undetermined.
+
+Decision: none of these operators is adopted. The form of D-39, with the name repeated in every
+clause, remains the best measured. A time window for the daily re-screening cannot come from the
+search tool, which has no date parameter: it needs direct access to the engine.

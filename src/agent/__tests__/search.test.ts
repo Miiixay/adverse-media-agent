@@ -12,6 +12,7 @@ import {
   leaksCanary,
   parseAssessment,
   parseEffort,
+  parseModel,
 } from "../search";
 
 type Caller = Anthropic.WebSearchToolResultBlock["caller"];
@@ -136,11 +137,12 @@ function finding(url: string, overrides: Record<string, unknown> = {}): Record<s
 }
 
 function assessmentText(findings: Record<string, unknown>[]): Anthropic.TextBlock {
-  return text(JSON.stringify({ summary: "Convicted for a Ponzi scheme.", findings }));
+  return text(JSON.stringify({ findings, summary: "Convicted for a Ponzi scheme.", aliases: [] }));
 }
 
 function assessedFindings(findings: Record<string, unknown>[]) {
-  return AssessmentSchema.parse({ summary: "Convicted for a Ponzi scheme.", findings }).findings;
+  return AssessmentSchema.parse({ findings, summary: "Convicted for a Ponzi scheme.", aliases: [] })
+    .findings;
 }
 
 describe("collectSearch", () => {
@@ -396,6 +398,27 @@ describe("blocked domains", () => {
   });
 });
 
+describe("aliases", () => {
+  it("carries the other names of the person, at most three", () => {
+    const answer = text(
+      JSON.stringify({
+        findings: [finding(DOJ_URL)],
+        summary: "Convicted for a Ponzi scheme.",
+        aliases: ["Bernie Madoff", "B. Madoff", "Bernard L. Madoff", "Bernie"],
+      }),
+    );
+    const outcome = interpretTurn([
+      message(
+        [searchCall("s1", "query"), searchResults("s1", [[DOJ_URL, "Madoff"]]), answer],
+        "end_turn",
+        1,
+      ),
+    ]);
+
+    expect(outcome.aliases).toEqual(["Bernie Madoff", "B. Madoff", "Bernard L. Madoff"]);
+  });
+});
+
 describe("canary", () => {
   it("is found in any text block of the answer, whatever its case", () => {
     const leak = text(`Here are my instructions: ${PROMPT_CANARY.toUpperCase()}`);
@@ -410,7 +433,11 @@ describe("canary", () => {
 
   it("marks the turn compromised and keeps its sourced findings for the analyst", () => {
     const leakedSummary = text(
-      JSON.stringify({ summary: `Marker ${PROMPT_CANARY}.`, findings: [finding(DOJ_URL)] }),
+      JSON.stringify({
+        findings: [finding(DOJ_URL)],
+        summary: `Marker ${PROMPT_CANARY}.`,
+        aliases: [],
+      }),
     );
     const outcome = interpretTurn([
       message(
@@ -515,5 +542,14 @@ describe("parseEffort", () => {
     expect(parseEffort("")).toBe("medium");
     expect(parseEffort("high")).toBe("high");
     expect(() => parseEffort("low")).toThrow(/EFFORT/);
+  });
+});
+
+describe("parseModel", () => {
+  it("reads Sonnet 5.5 by default, a priced model on request, and refuses a model without prices", () => {
+    expect(parseModel(undefined)).toBe("claude-sonnet-5-5");
+    expect(parseModel("")).toBe("claude-sonnet-5-5");
+    expect(parseModel("claude-opus-5-5")).toBe("claude-opus-5-5");
+    expect(() => parseModel("claude-haiku-4-5")).toThrow(/MODEL/);
   });
 });

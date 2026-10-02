@@ -98,8 +98,10 @@ export function resultFromRows(
     confidence: screening.confidence,
     summary: screening.summary,
     findings: resultFindings.toSorted((a, b) => rank(a) - rank(b)),
-    coverage: screening.coverageJson,
-    usage: screening.usageJson,
+    // Screenings stored before D-44 have no aliases.
+    coverage: { ...screening.coverageJson, aliases: screening.coverageJson.aliases ?? [] },
+    // Screenings stored before D-42 made a single call.
+    usage: { ...screening.usageJson, apiCalls: screening.usageJson.apiCalls ?? 1 },
     model: screening.model,
     promptVersion: screening.promptVersion,
     screenedAt: screening.createdAt.toISOString(),

@@ -18,18 +18,27 @@ const QUERY_BUDGET = MAX_SEARCHES - RESERVED_FREE_SEARCHES;
 
 const INTERNATIONAL_LANGUAGE: Language = "en";
 
-// One query per language. It keeps the first term listed for each offence category and every
-// proceedings term: topic words such as "sanctions" pull pages about the topic, while proceedings
-// terms favour articles in which someone is the subject of a case.
-const OFFENCE_CATEGORIES: readonly KeywordCategory[] = [
+// One query per language, its terms in order of priority: the first term of each financial
+// crime, the conviction and charge terms, then the investigation, lawsuit and scandal terms (D-39).
+// Terrorism, organised crime and violence are left out: a case in those reaches the press through
+// the conviction and charge terms.
+const SINGLE_QUERY_CATEGORIES: readonly KeywordCategory[] = [
   "fraud",
   "money_laundering",
   "corruption",
   "sanctions",
-  "terrorism",
-  "organized_crime",
-  "violence",
 ];
+// By position in the keyword table: conviction, then charge.
+const PROCEEDINGS_TERMS = 2;
+// By position in the keyword table: investigation, lawsuit, scandal.
+const REGULATORY_CIVIL_TERMS = 3;
+
+// The search engine binds a quoted name only to the term right after it: "Name" a OR b reads as
+// ("Name" a) OR b, so each clause repeats the name (D-39). Clauses are added in order while the
+// query stays within these limits. Brave's API reference gives 600 characters and 75 words for its
+// query, older documentation 400 and 50; Anthropic documents query_too_long without a figure.
+export const MAX_QUERY_CHARACTERS = 380;
+export const MAX_QUERY_WORDS = 48;
 
 // The v1 plan: financial crime apart from general criminal and judicial coverage.
 const SPLIT_GROUPS: readonly (readonly KeywordCategory[])[] = [
@@ -135,19 +144,37 @@ function languagesKeptSplit(languages: readonly Language[]): Set<Language> {
 
 function singleQueryTerms(language: Language): string[] {
   const keywords = NEGATIVE_KEYWORDS[language];
-  return [
-    ...OFFENCE_CATEGORIES.flatMap((category) => keywords[category].slice(0, 1)),
-    ...keywords.legal_proceedings,
+  const terms = [
+    ...SINGLE_QUERY_CATEGORIES.flatMap((category) => keywords[category].slice(0, 1)),
+    ...keywords.legal_proceedings.slice(0, PROCEEDINGS_TERMS),
+    // A regulator's inquiry or a lawsuit is adverse media too (D-38).
+    ...keywords.regulatory_civil.slice(0, REGULATORY_CIVIL_TERMS),
   ];
+  return [...new Set(terms)];
 }
 
 function splitTerms(language: Language, categories: readonly KeywordCategory[]): string[] {
   return categories.flatMap((category) => NEGATIVE_KEYWORDS[language][category]);
 }
 
+// "Name" t1 OR "Name" t2 OR ...: a long name keeps fewer clauses. The first clause stays whatever
+// its length, since a query needs the name; a name too long for it alone gets query_too_long,
+// reported in the coverage.
 function queryText(fullName: string, terms: readonly string[]): string {
   const spellings = terms.flatMap((term) => [term, ...(SPELLING_VARIANTS[term] ?? [])]);
-  return `"${fullName}" ${spellings.map(quoteIfPhrase).join(" OR ")}`;
+  const [first, ...others] = spellings.map((term) => `"${fullName}" ${quoteIfPhrase(term)}`);
+  let query = first ?? `"${fullName}"`;
+  for (const clause of others) {
+    const longer = `${query} OR ${clause}`;
+    if (!withinQueryLimits(longer)) break;
+    query = longer;
+  }
+  return query;
+}
+
+// Names are normalized to single spaces, and terms hold single spaces: words are space-separated.
+export function withinQueryLimits(query: string): boolean {
+  return query.length <= MAX_QUERY_CHARACTERS && query.split(" ").length <= MAX_QUERY_WORDS;
 }
 
 function quoteIfPhrase(term: string): string {

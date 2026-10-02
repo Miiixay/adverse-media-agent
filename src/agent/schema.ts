@@ -16,18 +16,17 @@ const DATE_PATTERN = "^[0-9]{4}(-[0-9]{2}(-[0-9]{2})?)?$";
 // asks for both, and search.ts cuts the corroborating URLs after filtering them (D-22).
 export const MAX_FINDINGS = 8;
 export const MAX_CORROBORATING_URLS = 3;
+export const MAX_ALIASES = 3;
 
 // Sent as is in output_config.format. The SDK helpers would fold the enums into descriptions and
 // the grammar would stop constraining them (D-18).
 export const ASSESSMENT_JSON_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["summary", "findings"],
+  // Written in this order under constrained decoding: the findings, then the summary that describes
+  // them, then the aliases (D-44).
+  required: ["findings", "summary", "aliases"],
   properties: {
-    summary: {
-      type: "string",
-      description: "Two or three factual sentences on the overall picture.",
-    },
     findings: {
       type: "array",
       description: `At most ${MAX_FINDINGS} findings, one per matter.`,
@@ -82,6 +81,17 @@ export const ASSESSMENT_JSON_SCHEMA = {
         },
       },
     },
+    summary: {
+      type: "string",
+      description:
+        "Two or three factual sentences on the overall picture, describing the findings listed.",
+    },
+    aliases: {
+      type: "array",
+      items: { type: "string" },
+      // The wording of the prompt (v12).
+      description: `Names the sources use instead of the legal name, such as a nickname-based name ("Toni Rossi" for Antonio Rossi), a stage name or a different spelling of the surname; not a longer legal form with middle names, not a maiden name mentioned in passing, never a namesake; at most ${MAX_ALIASES}, usually empty.`,
+    },
   },
 } as const;
 
@@ -94,7 +104,6 @@ function caseInsensitiveEnum<const T extends readonly string[]>(values: T) {
 }
 
 export const AssessmentSchema = z.object({
-  summary: z.string(),
   findings: z.array(
     z.object({
       url: z.string(),
@@ -111,6 +120,8 @@ export const AssessmentSchema = z.object({
       summary: z.string(),
     }),
   ),
+  summary: z.string(),
+  aliases: z.array(z.string()),
 });
 
 export type Assessment = z.infer<typeof AssessmentSchema>;

@@ -148,3 +148,8 @@ official releases or press reports of them. One case screens a person in Germany
 name of a well-known US defendant; it stands for a namesake and targets no private individual. Two
 cases rest on decisions that are not final, a trial under way and an appeal whose outcome was not
 found: screening reports proceedings as well as convictions, and every finding states its status.
+
+Two cases were added for the recall of regulatory and civil matters, under the same rule. Steve
+Jobs, who died in 2011: the SEC investigation of the backdating of Apple options is public record,
+and the agency's charges named two other executives. Marco Mouly, born Mardoché Mouly, a media
+figure convicted in three public cases. Each cites its sources in the file.

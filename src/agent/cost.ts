@@ -20,6 +20,10 @@ export const PRICES = {
 } as const;
 export type PricedModel = keyof typeof PRICES;
 
+export function isPricedModel(value: string): value is PricedModel {
+  return Object.hasOwn(PRICES, value);
+}
+
 // Billed per search on top of the tokens of its results; the Batches API does not discount it.
 export const WEB_SEARCH_PRICE_USD = 0.01;
 const TOKENS_PER_MILLION = 1_000_000;

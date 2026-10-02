@@ -1,12 +1,13 @@
 import Anthropic from "@anthropic-ai/sdk";
 
-import type { PricedModel } from "./cost";
+import { PRICES, isPricedModel, type PricedModel } from "./cost";
 import { BLOCKED_DOMAINS } from "./data/blocked-domains";
 import { MAX_SEARCHES } from "./prepare";
 import { PROMPT_CANARY, SYSTEM_PROMPT, buildUserMessage } from "./prompts";
 import {
   ASSESSMENT_JSON_SCHEMA,
   AssessmentSchema,
+  MAX_ALIASES,
   MAX_CORROBORATING_URLS,
   type Assessment,
 } from "./schema";
@@ -20,7 +21,8 @@ import type {
   TokenUsage,
 } from "./types";
 
-export const MODEL: PricedModel = "claude-sonnet-5-5";
+// Sonnet 5.5 screens (D-09). MODEL replays the fixtures on another model whose prices cost.ts holds.
+export const DEFAULT_MODEL: PricedModel = "claude-sonnet-5-5";
 const MAX_OUTPUT_TOKENS = 8_000;
 const MAX_CONTINUATIONS = 3;
 // Sonnet 5.5 defaults to high; medium is kept (D-30). High exists to replay the v1 configuration in
@@ -53,9 +55,10 @@ export async function searchAdverseMedia(
   plan: SearchPlan,
   timeBudgetMs: number,
   effort: Effort = "medium",
+  model: PricedModel = DEFAULT_MODEL,
 ): Promise<SearchOutcome> {
   const request = {
-    model: MODEL,
+    model,
     max_tokens: MAX_OUTPUT_TOKENS,
     // The cache breakpoint closes the static prefix, tools then system; the user message after it
     // changes on every screening. The tool definition carries user_location, so the prefix is only
@@ -75,7 +78,7 @@ export async function searchAdverseMedia(
   ];
   for (;;) {
     const remainingMs = deadline - Date.now();
-    if (remainingMs <= 0) return timedOut(responses, timeBudgetMs);
+    if (remainingMs <= 0) return timedOut(responses, timeBudgetMs, model);
     let response: Anthropic.Message;
     try {
       response = await client.messages.create(
@@ -84,7 +87,7 @@ export async function searchAdverseMedia(
       );
     } catch (error) {
       if (error instanceof Anthropic.APIConnectionTimeoutError) {
-        return timedOut(responses, timeBudgetMs);
+        return timedOut(responses, timeBudgetMs, model);
       }
       throw error;
     }
@@ -103,9 +106,19 @@ export function parseEffort(value: string | undefined): Effort {
   throw new Error(`EFFORT must be high or medium, got "${value}"`);
 }
 
+export function parseModel(value: string | undefined): PricedModel {
+  if (value === undefined || value === "") return DEFAULT_MODEL;
+  if (isPricedModel(value)) return value;
+  throw new Error(`MODEL must be one of ${Object.keys(PRICES).join(", ")}, got "${value}"`);
+}
+
 // A request cut by the timeout has no usage to report, although the API may still have run and
 // billed it; the usage and apiCalls of the outcome cover the answered requests only.
-function timedOut(responses: readonly Anthropic.Message[], timeBudgetMs: number): SearchOutcome {
+function timedOut(
+  responses: readonly Anthropic.Message[],
+  timeBudgetMs: number,
+  model: PricedModel,
+): SearchOutcome {
   const timeout: CoverageError = {
     code: "timeout",
     detail: `no complete answer within ${timeBudgetMs / 1000} s`,
@@ -117,9 +130,10 @@ function timedOut(responses: readonly Anthropic.Message[], timeBudgetMs: number)
       rejectedUrls: [],
       articles: [],
       executedQueries: [],
+      aliases: [],
       errors: [timeout],
       usage: NO_USAGE,
-      model: MODEL,
+      model,
       apiCalls: 0,
     };
   }
@@ -153,6 +167,8 @@ export function interpretTurn(responses: readonly Anthropic.Message[]): SearchOu
     rejectedUrls: sourced.rejectedUrls,
     articles: search.articles,
     executedQueries: search.queries,
+    // The grammar cannot bound an array (D-22): the list is cut here.
+    aliases: parsed.ok ? parsed.assessment.aliases.slice(0, MAX_ALIASES) : [],
     errors,
     usage: sumUsage(responses),
     model: final.model,

@@ -67,6 +67,8 @@ export const SOURCE_RELIABILITIES = [
   "official",
   "national_press",
   "local_press",
+  // Wikipedia and the like: named apart from unknown sources, weighed like them (D-44).
+  "encyclopedia",
   "blog",
   "social",
   "unknown",
@@ -129,6 +131,8 @@ export type CoverageErrorCode =
   | "compromised"
   // Most search results came from blocked domains: the search returned little else (D-37).
   | "flooded"
+  // The summary cites a year no finding is dated in: a warning, the coverage stays complete.
+  | "unsourced_summary"
   | "unexpected_stop_reason"
   | "invalid_output";
 
@@ -154,6 +158,7 @@ export type SearchOutcome = {
   rejectedUrls: string[];
   articles: RawArticle[];
   executedQueries: string[];
+  aliases: string[];
   errors: CoverageError[];
   usage: TokenUsage;
   model: string;
@@ -179,13 +184,16 @@ export type ScreeningResult = {
     searchesUsed: number;
     // Distinct search results the model read: tells "nothing came back" from "nothing negative".
     articlesReviewed: number;
+    // Other names the sources use for the person, at most three: a name the search did not query.
+    aliases: string[];
     // The URLs of those results, to tell whether an article was missed by the search or set aside
     // by the model. Kept in the result only, never in the run log: URLs often carry the name.
     urlsReviewed: string[];
     rejectedUrls: string[];
     errors: CoverageError[];
   };
-  usage: TokenUsage & { estimatedCostUsd: number };
+  // apiCalls: 2 when the person was searched again under an alias (D-42).
+  usage: TokenUsage & { estimatedCostUsd: number; apiCalls: number };
   model: string;
   promptVersion: string;
   screenedAt: string;

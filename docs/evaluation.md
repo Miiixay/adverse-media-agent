@@ -13,8 +13,8 @@ figures come from runs on 2026-10-01.
 - **Cost.** Every API call reports its usage; `src/agent/cost.ts` prices it with the figures of the
   pricing page read on 2026-09-30. For Claude Sonnet 5.5, per million tokens: $2 input, $2.50
   five-minute cache write, $0.20 cache read, $10 output; plus $10 per 1,000 searches.
-- **Configuration.** Model `claude-sonnet-5-5`, prompt `v1`, web search `web_search_20260318`
-  called directly. The full result of each case is kept in the gitignored `logs/evaluation/`, and
+- **Configuration.** Model `claude-sonnet-5-5`, web search `web_search_20260318` called directly;
+  each result records its prompt version, `v1` for the first measures, `v11` for the final run. The full result of each case is kept in the gitignored `logs/evaluation/`, and
   each run is logged in `logs/runs.jsonl` under a pseudonym.
 - **One run per version.** To compare search plans on the same code, `QUERIES_PER_LANGUAGE=2`
   replays the v1 plan. The v1 figures of the two native cases come from such runs, since these
@@ -37,6 +37,49 @@ figures come from runs on 2026-10-01.
 The homonym case first used Jean Martin, FR. Its 36 articles held no namesake with negative
 coverage: French judicial reporting rarely names ordinary defendants in full. The case was replaced
 because it no longer tested identity resolution.
+
+## Final results, 2026-10-01
+
+The configuration delivered: one query per language with the name repeated in every clause (D-39),
+regulatory and civil terms (D-38), medium effort and prompt caching, the grid of D-40 and D-43, a
+second search turn under an alias the sources use (D-42), and a warning when the summary cites years
+no finding is dated in (D-45). The last full run used prompt `v11`; the five fixed cases and the
+twelve extended ones (`npm run evaluate -- --extended`) ran once each. The pass column applies the
+final expectations to the archived results, without a new run: Jobs low or medium, Mouly three
+counted findings in any language.
+
+| case                | expected       | risk   | pass  | counted / findings | model calls | cost                      |
+| ------------------- | -------------- | ------ | ----- | ------------------ | ----------- | ------------------------- |
+| known-high          | high           | high   | yes   | 1 / 1              | 2           | $0.0929                   |
+| homonym             | low            | low    | yes   | 0 / 2              | 1           | $0.0425                   |
+| clean               | low            | low    | yes   | 0 / 0              | 1           | $0.0688                   |
+| native-only         | high           | high   | yes   | 2 / 2              | 1           | $0.0826                   |
+| native-only-noisy   | high           | high   | yes   | 1 / 1              | 1           | $0.0767                   |
+| sanctions           | high           | high   | yes   | 1 / 1              | 1           | $0.0803                   |
+| regulator           | medium or high | high   | yes   | 3 / 3              | 2           | $0.0828                   |
+| acquittal           | low            | low    | yes   | 1 / 1              | 1           | $0.0672                   |
+| investigation       | high           | high   | yes   | 3 / 3              | 2           | $0.1967                   |
+| spanish             | high           | high   | yes   | 2 / 2              | 1           | $0.0796                   |
+| polish              | high           | high   | yes   | 4 / 4              | 1           | $0.0898                   |
+| organization        | medium or high | medium | yes   | 1 / 1              | 1           | $0.0707                   |
+| homonym-abroad      | low            | low    | yes   | 0 / 2              | 1           | $0.0771                   |
+| clean-public-figure | low            | low    | yes   | 0 / 0              | 1           | $0.0682                   |
+| sparse-local        | high           | high   | yes   | 3 / 3              | 2           | $0.2407                   |
+| famous-noise        | low or medium  | medium | yes   | 2 / 2              | 1           | $0.0414                   |
+| multiple-matters    | high           | high   | yes   | 3 / 3              | 2           | $0.1688                   |
+| **total**           |                |        | 17/17 |                    | 22          | **$1.6269**, mean $0.0957 |
+
+- **Alias turns.** Five cases ran a second turn: a nickname (Bernie Madoff), a full legal name (James
+  Edward Staley), a maiden name (Daniela Garnero), a spelling variant (Mouslim Abdouramane) and an
+  alias (Marco Mouly). They changed no risk, gained three matters and raised the cost of the seventeen
+  cases by 34% against the previous runs; accepted (D-42). After this run, prompt `v12` narrowed the aliases to names
+  used instead of the legal name, and code skips an alias holding both names entered. Rerun
+  under `v12`, the seventeen cases pass with the same risks; Santanchè no longer runs a second turn,
+  Staley still does, and the total falls by 7%, to $1.5117 (`logs/comparison.md`).
+- **Mean cost.** $0.0957 per screening with the alias turns, $0.0704 on the twelve cases that ran a
+  single turn.
+- **Warnings.** Eight of seventeen summaries cite a year no finding is dated in, mostly years of
+  context such as an arrest or a death; the warning stays (D-45).
 
 ## Results by version
 
@@ -105,6 +148,39 @@ The two native cases were run under both plans, once each.
 
 In both cases, the English query returned only unrelated namesakes.
 
+## Search engine query semantics
+
+The Steve Jobs case missed the SEC investigation of Apple's option backdating, although the agent's
+query held "investigation", "lawsuit" and "settlement" (D-38). On 2026-10-01, a throwaway script
+(`logs/probe-query.mts`) asked the model to run one query exactly as written, with a single search,
+and to list what came back. The URLs were read from the search result blocks, the queries run from
+the tool calls, and the model said for each page whether it dealt with the backdating. One run per
+query.
+
+| query                                                                           | results about Jobs                          | about the backdating |
+| ------------------------------------------------------------------------------- | ------------------------------------------- | -------------------- |
+| the agent's query: `"Steve Jobs" fraud OR "money laundering" OR ... OR scandal` | 3 of 9: Wikipedia, disambiguation, FBI file | 0                    |
+| the same, terms in parentheses                                                  | 3 of 9, six URLs unchanged                  | 0                    |
+| `"Steve Jobs" investigation`                                                    | 10 of 10                                    | 1                    |
+| `"Steve Jobs" fraud OR "Steve Jobs" investigation OR "Steve Jobs" lawsuit`      | 9 of 9                                      | 3                    |
+| `Steve Jobs SEC backdating stock options`, a control that names the matter      | 9 of 9                                      | 9                    |
+
+The engine binds a quoted name to the term right after it and not beyond: `"Name" a OR b OR c` reads
+as `("Name" a) OR b OR c`. The agent's queries were therefore unions of clauses without the name, and
+on a famous name these clauses brought back pages about the terms: the Wikipedia article on money
+laundering, Justice Department releases on other defendants, Steve Madden. Rare names were still
+found because the engine ranks first the pages that contain the quoted phrase, without requiring it;
+this also explains the earlier search for "Jean Martin" that returned Henri Martin. With the name
+repeated in each clause, every result concerned the person, and a civil matter no run had found came
+back as well: the Silicon Valley no-poach case.
+
+The query now repeats the name in every clause (D-39). Under that form, the Jobs case finds the
+backdating matter through the planned query alone, as a shareholder class action.
+
+The labels in these probes are the model's, read from the extracts, and they vary: on 2026-10-02,
+the same Fortune article of March 2008 was tagged as dealing with the backdating in one probe and
+not in the next (D-48). A difference of one or two pages in such a column is within that variation.
+
 ## Identity evidence, as returned by the model
 
 Homonym case, v2.4. Both namesakes come back at low identity and are not counted:
@@ -128,18 +204,26 @@ Native-only case, the article on the investigation of Valérie Bozzi's partner:
 
 ## Remaining reservations
 
-- **Small sample.** Five cases, one run per version, with the noise described above.
-- **Sparse coverage is not tested.** Both native cases have rare names and well-indexed coverage:
-  regional public radio, an anti-corruption association, the legal press. The recall of one query
-  per language on a person covered by a single local outlet is not measured.
+- **Small sample.** Seventeen cases, one run per configuration, with the noise described above.
+- **Sparse coverage.** One case, a former mayor in Mayotte covered by local outlets, is found in
+  every run; one case is not a measure of recall on local coverage.
 - **Identity rests on the name and the country.** A date of birth or a role, if the input carried
   them, would be the main improvement.
 - **Medium effort cuts free searches.** On an ambiguous identity, the model may skip the search
   that would settle it. The completeness check covers the planned queries, not the free ones.
 - **Free searches on the surname alone.** They added cost and noise on the clean case. A prompt rule
   keeping the full name in free searches would bound them.
-- **Quoted names are not enforced.** The search for "Jean Martin" returned Henri Martin and a street
-  called rue Jean-Martin. The identity judgment is what filters them out.
+- **Quoted names bind one term.** The engine binds a quoted name to the term after it only (see
+  "Search engine query semantics"); the query repeats the name in every clause since D-39, and the
+  identity judgment still filters namesakes.
+- **Language tags.** The model sets the language of a finding, and does not always read it from the
+  article: Mouly's money-laundering finding, from a French site, came back tagged `en`. Expectations
+  on the language of findings are therefore loose: the Mouly case counts findings in any language.
+- **Undated civil claims.** A civil claim without a date stays at medium, since the rule that lets an
+  old undecided claim fall to low needs a date (D-40); the Jobs class action came back undated in
+  most runs, hence the Jobs expectation of low or medium.
+- **Alias turns.** A second search turn under an alias adds about a third to the cost on these cases
+  (D-42), and runs on names that are not aliases in practice, such as a longer legal form.
 - **Cache sharing.** The cached prefix differs by country, because the tool carries `user_location`.
   No case read another case's cache in these runs.
 - **Undated findings.** Some findings come without a date, such as the Marcus Held conviction, so the
@@ -152,9 +236,9 @@ Native-only case, the article on the investigation of Valérie Bozzi's partner:
   per screening.
 - **Two-step, search then extraction on a cheaper model (D-08).** Output is 16% of the v2.4 cost, so
   the saving is bounded by that share, minus the input tokens of the second call.
-- **`allowed_domains` or `blocked_domains`.** A block list of low-value sites could cut tokens. An
-  allow list would put recall at risk on regional outlets, which carried the coverage of both native
-  cases.
+- **`allowed_domains`.** An allow list would put recall at risk on regional outlets, which carried
+  the coverage of the native cases. A block list was tried on the search tool and moved to code: the
+  tool filter changed the whole result set (D-37).
 - **Time window for daily monitoring.** The web search tool parameters checked have no date filter.
   A 24–48 hour window would rely on the prompt and on filtering finding dates in code, together
   with the delta on URL hashes.

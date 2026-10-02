@@ -20,14 +20,20 @@ const RESULTS_DIRECTORY = "logs/evaluation";
 const CONCURRENT_CASES = 4;
 
 const RISK_LEVELS = ["low", "medium", "high"] as const;
-const MATCHED_FIELDS = ["language", "status", "subject", "category"] as const;
+const MATCHED_FIELDS = ["language", "status", "subject", "category", "identityConfidence"] as const;
+
+// One accepted value, or several when the model may report the matter either way.
+const acceptedValues = z.union([z.string(), z.array(z.string()).min(1)]).optional();
 
 const findingMatchSchema = z
   .object({
-    language: z.string().optional(),
-    status: z.string().optional(),
-    subject: z.string().optional(),
-    category: z.string().optional(),
+    language: acceptedValues,
+    status: acceptedValues,
+    subject: acceptedValues,
+    category: acceptedValues,
+    identityConfidence: acceptedValues,
+    // A word the title or the summary must contain, in any case: the matter, not just any finding.
+    mentions: z.string().optional(),
   })
   .strict();
 
@@ -37,12 +43,19 @@ const expectationSchema = z
     risk: z.union([z.enum(RISK_LEVELS), z.array(z.enum(RISK_LEVELS)).min(1)]),
     countedFindings: z.number().int().optional(),
     minCountedFindings: z.number().int().optional(),
+    // Counted or not.
+    minFindings: z.number().int().optional(),
     minLowIdentityFindings: z.number().int().optional(),
     minArticlesReviewed: z.number().int().optional(),
     // At least one counted finding must carry these values.
     countedFindingWith: findingMatchSchema.optional(),
     // At least one finding, counted or not, must carry these values.
     findingWith: findingMatchSchema.optional(),
+    // At least `count` counted findings must carry these values.
+    minCountedFindingsWith: z
+      .object({ count: z.number().int().min(1), match: findingMatchSchema })
+      .strict()
+      .optional(),
   })
   .strict();
 
@@ -153,6 +166,7 @@ function passed(run: CaseRun): boolean {
     expectedRisks(run.testCase).includes(risk) &&
     (expected.countedFindings === undefined || counted.length === expected.countedFindings) &&
     (expected.minCountedFindings === undefined || counted.length >= expected.minCountedFindings) &&
+    (expected.minFindings === undefined || findings.length >= expected.minFindings) &&
     (expected.minLowIdentityFindings === undefined ||
       lowIdentity.length >= expected.minLowIdentityFindings) &&
     (expected.minArticlesReviewed === undefined ||
@@ -160,7 +174,10 @@ function passed(run: CaseRun): boolean {
     (expected.countedFindingWith === undefined ||
       counted.some((finding) => matches(finding, expected.countedFindingWith ?? {}))) &&
     (expected.findingWith === undefined ||
-      findings.some((finding) => matches(finding, expected.findingWith ?? {})))
+      findings.some((finding) => matches(finding, expected.findingWith ?? {}))) &&
+    (expected.minCountedFindingsWith === undefined ||
+      counted.filter((finding) => matches(finding, expected.minCountedFindingsWith?.match ?? {}))
+        .length >= expected.minCountedFindingsWith.count)
   );
 }
 
@@ -170,8 +187,16 @@ function expectedRisks(testCase: TestCase): readonly string[] {
 }
 
 function matches(finding: Finding, wanted: FindingMatch): boolean {
-  return MATCHED_FIELDS.every(
-    (field) => wanted[field] === undefined || finding[field] === wanted[field],
+  const fieldsMatch = MATCHED_FIELDS.every((field) => {
+    const accepted = wanted[field];
+    if (accepted === undefined) return true;
+    return typeof accepted === "string"
+      ? finding[field] === accepted
+      : accepted.includes(finding[field]);
+  });
+  const text = `${finding.title} ${finding.summary}`.toLowerCase();
+  return (
+    fieldsMatch && (wanted.mentions === undefined || text.includes(wanted.mentions.toLowerCase()))
   );
 }
 

@@ -28,6 +28,7 @@ cp .env.example .env.local
 | `DATABASE_URL_UNPOOLED` | `db:migrate`                             | Neon connection string, direct, for migrations                                                    |
 | `QUERIES_PER_LANGUAGE`  | measurements only                        | `2` replays the v1 search plan, two queries per language; default `1`                             |
 | `EFFORT`                | measurements only                        | `high` replays the v1 effort; default `medium`                                                    |
+| `MODEL`                 | measurements only                        | `claude-opus-5-5` replays the fixtures on Opus 5.5 (D-09); default `claude-sonnet-5-5`            |
 
 Generate `LOG_PSEUDONYM_KEY` with:
 
