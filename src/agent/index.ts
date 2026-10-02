@@ -3,7 +3,7 @@ import "server-only";
 import Anthropic from "@anthropic-ai/sdk";
 
 import { estimateCostUsd } from "./cost";
-import { prepare } from "./prepare";
+import { parseQueriesPerLanguage, prepare } from "./prepare";
 import { PROMPT_VERSION } from "./prompts";
 import { screeningInputSchema } from "./schema";
 import { isCoverageComplete, score } from "./score";
@@ -21,7 +21,7 @@ export const SEARCH_TIME_BUDGET_MS = 240_000;
 export async function screenIndividual(rawInput: ScreeningInput): Promise<ScreeningResult> {
   const input = screeningInputSchema.parse(rawInput);
   const screenedAt = new Date();
-  const plan = prepare(input);
+  const plan = prepare(input, parseQueriesPerLanguage(process.env.QUERIES_PER_LANGUAGE));
   const outcome = await searchAdverseMedia(new Anthropic(), input, plan, SEARCH_TIME_BUDGET_MS);
 
   const plannedQueries = plan.queries.map((query) => query.text);

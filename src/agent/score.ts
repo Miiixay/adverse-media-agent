@@ -110,9 +110,10 @@ export function isCoverageComplete(
   );
 }
 
-// A finding at low identity confidence is probably about a homonym: shown, never counted.
+// Shown, never counted: a finding at low identity confidence, probably about a homonym, and a
+// finding about an associate, in which the person is not personally involved (D-28).
 function isCounted(finding: AssessedFinding): boolean {
-  return finding.identityConfidence !== "low";
+  return finding.identityConfidence !== "low" && finding.subject !== "associate";
 }
 
 // The least certain identity among the counted findings. Without any, an empty result is only
@@ -125,7 +126,10 @@ function overallConfidence(
   const countedIdentities = findings.filter(isCounted).map((finding) => finding.identityConfidence);
   if (countedIdentities.length > 0) return countedIdentities.reduce((a, b) => lower(a, b));
   if (!coverageComplete) return "low";
-  return findings.some((finding) => CRITICAL_CATEGORIES.has(finding.category)) ? "medium" : "high";
+  const homonymInCriticalCategory = findings.some(
+    (finding) => finding.subject !== "associate" && CRITICAL_CATEGORIES.has(finding.category),
+  );
+  return homonymInCriticalCategory ? "medium" : "high";
 }
 
 function baseLevel(finding: AssessedFinding): RiskLevel {

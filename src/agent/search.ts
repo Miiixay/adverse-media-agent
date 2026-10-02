@@ -22,6 +22,8 @@ import type {
 export const MODEL: PricedModel = "claude-sonnet-5-5";
 const MAX_OUTPUT_TOKENS = 8_000;
 const MAX_CONTINUATIONS = 3;
+// Sonnet 5.5 defaults to high. Changing it invalidates the prompt cache, so it is fixed here (v2.4).
+const EFFORT = "medium";
 // Retrying a request whose answer never arrived would run and bill the searches a second time.
 const SEARCH_MAX_RETRIES = 0;
 
@@ -45,9 +47,15 @@ export async function searchAdverseMedia(
   const request = {
     model: MODEL,
     max_tokens: MAX_OUTPUT_TOKENS,
-    system: SYSTEM_PROMPT,
+    // The cache breakpoint closes the static prefix, tools then system; the user message after it
+    // changes on every screening. The tool definition carries user_location, so the prefix is only
+    // shared between screenings of one country (v2.3).
+    system: [{ type: "text", text: SYSTEM_PROMPT, cache_control: { type: "ephemeral" } }],
     tools: [webSearchTool(input.country, plan.countrySupported)],
-    output_config: { format: { type: "json_schema", schema: ASSESSMENT_JSON_SCHEMA } },
+    output_config: {
+      effort: EFFORT,
+      format: { type: "json_schema", schema: ASSESSMENT_JSON_SCHEMA },
+    },
   } satisfies Omit<Anthropic.MessageCreateParamsNonStreaming, "messages">;
 
   const deadline = Date.now() + timeBudgetMs;
@@ -130,8 +138,10 @@ export function interpretTurn(responses: readonly Anthropic.Message[]): SearchOu
   };
 }
 
-// Only top-level result blocks are read: with allowed_callers ["direct"] every search result is
-// one of them. Dynamic filtering would nest results under code execution blocks (D-17).
+// Every search shows up as a server_tool_use and web_search_tool_result pair in the content,
+// whether the model called it directly or from the code that filters results (D-17). The caller
+// field tells the two apart and is not needed here. The output of that code is not a source:
+// finding URLs are checked against search results only.
 export function collectSearch(content: readonly Anthropic.ContentBlock[]): {
   articles: RawArticle[];
   queries: string[];
@@ -139,7 +149,7 @@ export function collectSearch(content: readonly Anthropic.ContentBlock[]): {
 } {
   const queriesById = new Map<string, string>();
   for (const block of content) {
-    if (block.type !== "server_tool_use") continue;
+    if (block.type !== "server_tool_use" || block.name !== "web_search") continue;
     const query = queryOf(block.input);
     if (query !== undefined) queriesById.set(block.id, query);
   }
@@ -227,6 +237,7 @@ function webSearchTool(
     type: "web_search_20260318",
     name: "web_search",
     max_uses: MAX_SEARCHES,
+    // Dynamic filtering, the default, cost 14% more on the fixtures and is not ZDR-eligible (D-17).
     allowed_callers: ["direct"],
     // The API rejects country codes it does not support. Only countries of the language table are
     // localized; the others are searched in the international English press.

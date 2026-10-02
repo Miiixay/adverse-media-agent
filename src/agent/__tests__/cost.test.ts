@@ -39,6 +39,7 @@ function result(): ScreeningResult {
         title: "United States v. Bernard L. Madoff",
         date: "2009-06-29",
         language: "en",
+        subject: "person",
         category: "fraud",
         severity: "critical",
         status: "conviction",

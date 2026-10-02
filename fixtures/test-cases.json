@@ -37,5 +37,39 @@
       "countedFindings": 0
     },
     "rationale": "Fictional, uncommon name with no press coverage. Checks the no-result path: risk low, complete coverage in de and en, no invented finding."
+  },
+  {
+    "id": "native-only",
+    "input": {
+      "firstName": "Valérie",
+      "lastName": "Bozzi",
+      "country": "FR"
+    },
+    "expected": {
+      "risk": "high",
+      "minCountedFindings": 1,
+      "countedFindingWith": {
+        "language": "fr",
+        "status": "conviction"
+      }
+    },
+    "rationale": "Former mayor of Grosseto-Prugna, Corsica, convicted in May 2025 of prise illégale d'intérêts by the Aix-en-Provence court of appeal and of favoritisme by the Bastia criminal court. Covered by the Corsican press in French, with no English coverage found: only the French query can find it. Guards the recall of the search plan. The appeal judged the case; the cassation appeal does not suspend it, hence conviction."
+  },
+  {
+    "id": "native-only-noisy",
+    "input": {
+      "firstName": "Marcus",
+      "lastName": "Held",
+      "country": "DE"
+    },
+    "expected": {
+      "risk": "high",
+      "minCountedFindings": 1,
+      "countedFindingWith": {
+        "language": "de",
+        "status": "conviction"
+      }
+    },
+    "rationale": "Former mayor of Oppenheim, convicted by the Mainz regional court in 2021 of four counts of bribery and twelve of breach of trust, one year and eight months suspended; final since the Federal Court of Justice decision of 8 February 2023. Covered by the regional press in German, in English only through machine translations. Held is also a common German word (hero), which adds noise to the ranking: guards recall under a noisy name."
   }
 ]

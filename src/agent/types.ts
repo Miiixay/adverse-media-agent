@@ -68,12 +68,16 @@ export const SOURCE_RELIABILITIES = [
   "social",
   "unknown",
 ] as const;
+// Who the article is about: the screened person, an organization linked to the person, or an
+// associate such as a relative or partner, in which the person is not personally involved.
+export const SUBJECTS = ["person", "organization", "associate"] as const;
 
 export type Category = (typeof CATEGORIES)[number];
 export type Severity = (typeof SEVERITIES)[number];
 export type Status = (typeof STATUSES)[number];
 export type Confidence = (typeof CONFIDENCE_LEVELS)[number];
 export type SourceReliability = (typeof SOURCE_RELIABILITIES)[number];
+export type Subject = (typeof SUBJECTS)[number];
 export type RiskLevel = "low" | "medium" | "high";
 
 export type RawArticle = {
@@ -90,6 +94,7 @@ export type Finding = {
   title: string;
   date: string | null;
   language: string;
+  subject: Subject;
   category: Category;
   severity: Severity;
   status: Status;

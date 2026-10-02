@@ -13,7 +13,14 @@ import {
 
 type TestCase = (typeof testCases)[number];
 type CaseRun = { testCase: TestCase } & ({ result: ScreeningResult } | { error: unknown });
-type Expectation = { risk: string; countedFindings?: number; minLowIdentityFindings?: number };
+type Expectation = {
+  risk: string;
+  countedFindings?: number;
+  minCountedFindings?: number;
+  minLowIdentityFindings?: number;
+  // At least one counted finding must carry these values.
+  countedFindingWith?: { language?: string; status?: string };
+};
 
 const RESULTS_DIRECTORY = "logs/evaluation";
 const COLUMNS = [
@@ -27,6 +34,8 @@ const COLUMNS = [
   "searches",
   "articles",
   "input tokens",
+  "cache read",
+  "cache write",
   "output tokens",
   "cost USD",
   "duration s",
@@ -84,13 +93,21 @@ async function saveResult(id: string, result: ScreeningResult): Promise<void> {
 function passed(run: CaseRun): boolean {
   if (!("result" in run)) return false;
   const expected: Expectation = run.testCase.expected;
-  const lowIdentity = run.result.findings.length - countedFindings(run.result);
+  const counted = run.result.findings.filter((finding) => finding.countedInScore);
+  const lowIdentity = run.result.findings.length - counted.length;
+  const wanted = expected.countedFindingWith;
   return (
     run.result.risk === expected.risk &&
-    (expected.countedFindings === undefined ||
-      countedFindings(run.result) === expected.countedFindings) &&
+    (expected.countedFindings === undefined || counted.length === expected.countedFindings) &&
+    (expected.minCountedFindings === undefined || counted.length >= expected.minCountedFindings) &&
     (expected.minLowIdentityFindings === undefined ||
-      lowIdentity >= expected.minLowIdentityFindings)
+      lowIdentity >= expected.minLowIdentityFindings) &&
+    (wanted === undefined ||
+      counted.some(
+        (finding) =>
+          (wanted.language === undefined || finding.language === wanted.language) &&
+          (wanted.status === undefined || finding.status === wanted.status),
+      ))
   );
 }
 
@@ -118,6 +135,8 @@ function table(runs: readonly CaseRun[]): string {
       String(result.usage.webSearches),
       String(result.coverage.articlesReviewed),
       String(result.usage.inputTokens),
+      String(result.usage.cacheReadTokens),
+      String(result.usage.cacheWrite5mTokens + result.usage.cacheWrite1hTokens),
       String(result.usage.outputTokens),
       result.usage.estimatedCostUsd.toFixed(4),
       (result.durationMs / 1000).toFixed(1),

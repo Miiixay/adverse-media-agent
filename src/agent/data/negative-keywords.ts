@@ -11,7 +11,14 @@ export type KeywordCategory =
   | "legal_proceedings";
 
 // Nouns are preferred over participles in languages that inflect them by gender ("condamnation"
-// rather than "condamné" / "condamnée"), so that one term matches articles about anyone.
+// rather than "condamné" / "condamnée"), so that one term matches articles about anyone. Within an
+// offence category the most common press term comes first: it is the one the query keeps.
+// Other spellings of a term, searched with it wherever the term is: British and American English
+// for the international press.
+export const SPELLING_VARIANTS: Readonly<Partial<Record<string, readonly string[]>>> = {
+  "organized crime": ["organised crime"],
+};
+
 export const NEGATIVE_KEYWORDS: Record<Language, Record<KeywordCategory, readonly string[]>> = {
   cs: {
     fraud: ["podvod", "zpronevěra"],
@@ -59,7 +66,7 @@ export const NEGATIVE_KEYWORDS: Record<Language, Record<KeywordCategory, readonl
     corruption: ["corruption", "bribery"],
     sanctions: ["sanctions"],
     terrorism: ["terrorism"],
-    organized_crime: ["organized crime", "organised crime"],
+    organized_crime: ["organized crime"],
     violence: ["assault", "murder"],
     legal_proceedings: ["convicted", "indicted", "arrested"],
   },

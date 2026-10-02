@@ -1,6 +1,14 @@
 import { COUNTRY_LANGUAGES } from "./data/country-languages";
-import { NEGATIVE_KEYWORDS, type KeywordCategory } from "./data/negative-keywords";
+import {
+  NEGATIVE_KEYWORDS,
+  SPELLING_VARIANTS,
+  type KeywordCategory,
+} from "./data/negative-keywords";
 import type { Language, ScreeningInput, SearchPlan, SearchQuery } from "./types";
+
+// A measurement switch, not a product setting: 2 replays the v1 plan, two queries per language,
+// so that v1 and v2 can be compared on the same code (v2.2 in docs/evaluation.md).
+export type QueriesPerLanguage = 1 | 2;
 
 export const MAX_SEARCHES = 8;
 // Searches kept out of the plan so the model can settle an identity doubt or try another form
@@ -10,13 +18,24 @@ const QUERY_BUDGET = MAX_SEARCHES - RESERVED_FREE_SEARCHES;
 
 const INTERNATIONAL_LANGUAGE: Language = "en";
 
-// Two focused queries per language rank better than one long OR list, and keep financial crime
-// apart from general criminal and judicial coverage.
-const QUERY_GROUPS: readonly (readonly KeywordCategory[])[] = [
+// One query per language. It keeps the first term listed for each offence category and every
+// proceedings term: topic words such as "sanctions" pull pages about the topic, while proceedings
+// terms favour articles in which someone is the subject of a case.
+const OFFENCE_CATEGORIES: readonly KeywordCategory[] = [
+  "fraud",
+  "money_laundering",
+  "corruption",
+  "sanctions",
+  "terrorism",
+  "organized_crime",
+  "violence",
+];
+
+// The v1 plan: financial crime apart from general criminal and judicial coverage.
+const SPLIT_GROUPS: readonly (readonly KeywordCategory[])[] = [
   ["fraud", "money_laundering", "corruption", "sanctions"],
   ["terrorism", "organized_crime", "violence", "legal_proceedings"],
 ];
-const ALL_CATEGORIES = QUERY_GROUPS.flat();
 
 // Letters that Unicode NFD does not split into a base letter and a combining mark.
 const UNDECOMPOSABLE_LETTERS: Readonly<Record<string, string>> = {
@@ -35,9 +54,12 @@ const UNDECOMPOSABLE_LETTERS: Readonly<Record<string, string>> = {
   ı: "i",
 };
 
-const COMBINING_MARKS = /[̀-ͯ]/g;
+const COMBINING_MARKS = /\p{M}/gu;
 
-export function prepare(input: ScreeningInput): SearchPlan {
+export function prepare(
+  input: ScreeningInput,
+  queriesPerLanguage: QueriesPerLanguage = 1,
+): SearchPlan {
   const firstName = normalizeName(input.firstName);
   const lastName = normalizeName(input.lastName);
   const { languages, countrySupported } = languagesFor(input.country);
@@ -45,8 +67,14 @@ export function prepare(input: ScreeningInput): SearchPlan {
     languages,
     countrySupported,
     nameVariants: nameVariants(firstName, lastName),
-    queries: buildQueries(`${firstName} ${lastName}`, languages),
+    queries: buildQueries(`${firstName} ${lastName}`, languages, queriesPerLanguage),
   };
+}
+
+export function parseQueriesPerLanguage(value: string | undefined): QueriesPerLanguage {
+  if (value === undefined || value === "" || value === "1") return 1;
+  if (value === "2") return 2;
+  throw new Error(`QUERIES_PER_LANGUAGE must be 1 or 2, got "${value}"`);
 }
 
 export function languagesFor(country: string): Pick<SearchPlan, "languages" | "countrySupported"> {
@@ -67,45 +95,59 @@ export function nameVariants(firstName: string, lastName: string): string[] {
   ]);
 }
 
-export function buildQueries(fullName: string, languages: readonly Language[]): SearchQuery[] {
-  const merged = languagesToMerge(languages);
-  return languages.flatMap((language) => {
-    const groups = merged.has(language) ? [ALL_CATEGORIES] : QUERY_GROUPS;
-    return groups.map((categories) => ({
-      language,
-      text: queryText(fullName, language, categories),
-    }));
-  });
-}
-
-// Over budget, native languages fall back to one merged query each, starting from the last
-// listed: the first language carries the most press and English covers the international press.
-function languagesToMerge(languages: readonly Language[]): Set<Language> {
-  const merged = new Set<Language>();
-  let plannedQueries = languages.length * QUERY_GROUPS.length;
-  const nativeFromLast = languages
-    .filter((language) => language !== INTERNATIONAL_LANGUAGE)
-    .reverse();
-  for (const language of nativeFromLast) {
-    if (plannedQueries <= QUERY_BUDGET) break;
-    merged.add(language);
-    plannedQueries -= QUERY_GROUPS.length - 1;
-  }
-  if (plannedQueries > QUERY_BUDGET) {
+export function buildQueries(
+  fullName: string,
+  languages: readonly Language[],
+  queriesPerLanguage: QueriesPerLanguage = 1,
+): SearchQuery[] {
+  if (languages.length > QUERY_BUDGET) {
     throw new Error(
-      `Languages ${languages.join(", ")} need ${plannedQueries} queries, over the budget of ${QUERY_BUDGET}`,
+      `Languages ${languages.join(", ")} need ${languages.length} queries, over the budget of ${QUERY_BUDGET}`,
     );
   }
-  return merged;
+  const split = queriesPerLanguage === 2 ? languagesKeptSplit(languages) : new Set<Language>();
+  return languages.flatMap((language) =>
+    split.has(language)
+      ? SPLIT_GROUPS.map((categories) => ({
+          language,
+          text: queryText(fullName, splitTerms(language, categories)),
+        }))
+      : [{ language, text: queryText(fullName, singleQueryTerms(language)) }],
+  );
 }
 
-function queryText(
-  fullName: string,
-  language: Language,
-  categories: readonly KeywordCategory[],
-): string {
-  const terms = categories.flatMap((category) => NEGATIVE_KEYWORDS[language][category]);
-  return `"${fullName}" ${terms.map(quoteIfPhrase).join(" OR ")}`;
+// Over budget, the v1 plan gives native languages a single query, starting from the last listed:
+// the first language carries the most press and English covers the international press (D-20).
+function languagesKeptSplit(languages: readonly Language[]): Set<Language> {
+  const split = new Set(languages);
+  let plannedQueries = languages.length * SPLIT_GROUPS.length;
+  const unsplitOrder = [
+    ...languages.filter((language) => language !== INTERNATIONAL_LANGUAGE).reverse(),
+    INTERNATIONAL_LANGUAGE,
+  ];
+  for (const language of unsplitOrder) {
+    if (plannedQueries <= QUERY_BUDGET) break;
+    split.delete(language);
+    plannedQueries -= SPLIT_GROUPS.length - 1;
+  }
+  return split;
+}
+
+function singleQueryTerms(language: Language): string[] {
+  const keywords = NEGATIVE_KEYWORDS[language];
+  return [
+    ...OFFENCE_CATEGORIES.flatMap((category) => keywords[category].slice(0, 1)),
+    ...keywords.legal_proceedings,
+  ];
+}
+
+function splitTerms(language: Language, categories: readonly KeywordCategory[]): string[] {
+  return categories.flatMap((category) => NEGATIVE_KEYWORDS[language][category]);
+}
+
+function queryText(fullName: string, terms: readonly string[]): string {
+  const spellings = terms.flatMap((term) => [term, ...(SPELLING_VARIANTS[term] ?? [])]);
+  return `"${fullName}" ${spellings.map(quoteIfPhrase).join(" OR ")}`;
 }
 
 function quoteIfPhrase(term: string): string {

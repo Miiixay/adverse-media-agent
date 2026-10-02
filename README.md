@@ -18,12 +18,13 @@ npm install
 cp .env.example .env.local
 ```
 
-| Variable            | Used by                | Purpose                                                  |
-| ------------------- | ---------------------- | -------------------------------------------------------- |
-| `ANTHROPIC_API_KEY` | the agent, server side | Claude API key                                           |
-| `LOG_PSEUDONYM_KEY` | `screen`, `evaluate`   | Key of the HMAC that replaces names in `logs/runs.jsonl` |
-| `CRON_SECRET`       | `GET /api/cron/daily`  | Bearer token expected from Vercel Cron                   |
-| `DATABASE_URL`      | the app                | Postgres connection string                               |
+| Variable               | Used by                | Purpose                                                               |
+| ---------------------- | ---------------------- | --------------------------------------------------------------------- |
+| `ANTHROPIC_API_KEY`    | the agent, server side | Claude API key                                                        |
+| `LOG_PSEUDONYM_KEY`    | `screen`, `evaluate`   | Key of the HMAC that replaces names in `logs/runs.jsonl`              |
+| `CRON_SECRET`          | `GET /api/cron/daily`  | Bearer token expected from Vercel Cron                                |
+| `DATABASE_URL`         | the app                | Postgres connection string                                            |
+| `QUERIES_PER_LANGUAGE` | measurements only      | `2` replays the v1 search plan, two queries per language; default `1` |
 
 Generate `LOG_PSEUDONYM_KEY` with:
 

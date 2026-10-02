@@ -1,6 +1,13 @@
 import { z } from "zod";
 
-import { CATEGORIES, CONFIDENCE_LEVELS, SEVERITIES, SOURCE_RELIABILITIES, STATUSES } from "./types";
+import {
+  CATEGORIES,
+  CONFIDENCE_LEVELS,
+  SEVERITIES,
+  SOURCE_RELIABILITIES,
+  STATUSES,
+  SUBJECTS,
+} from "./types";
 
 // A full date, or the year and month, or the year, as far as the article gives it.
 const DATE_PATTERN = "^[0-9]{4}(-[0-9]{2}(-[0-9]{2})?)?$";
@@ -32,6 +39,7 @@ export const ASSESSMENT_JSON_SCHEMA = {
           "corroboratingUrls",
           "language",
           "date",
+          "subject",
           "category",
           "severity",
           "status",
@@ -51,6 +59,12 @@ export const ASSESSMENT_JSON_SCHEMA = {
           date: {
             anyOf: [{ type: "string", pattern: DATE_PATTERN }, { type: "null" }],
             description: "YYYY-MM-DD, YYYY-MM or YYYY; null when the article gives no date.",
+          },
+          subject: {
+            type: "string",
+            enum: SUBJECTS,
+            description:
+              "person: the screened person; organization: a company or body linked to the person; associate: a relative, partner or associate, the person not being personally involved.",
           },
           category: { type: "string", enum: CATEGORIES },
           severity: { type: "string", enum: SEVERITIES },
@@ -81,6 +95,7 @@ export const AssessmentSchema = z.object({
       corroboratingUrls: z.array(z.string()),
       language: z.string().transform((value) => value.toLowerCase()),
       date: z.string().regex(new RegExp(DATE_PATTERN)).nullable(),
+      subject: caseInsensitiveEnum(SUBJECTS),
       category: caseInsensitiveEnum(CATEGORIES),
       severity: caseInsensitiveEnum(SEVERITIES),
       status: caseInsensitiveEnum(STATUSES),

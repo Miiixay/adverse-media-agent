@@ -4,27 +4,49 @@ import { describe, expect, it } from "vitest";
 import { AssessmentSchema } from "../schema";
 import { attachSources, collectSearch, interpretTurn, parseAssessment } from "../search";
 
+type Caller = Anthropic.WebSearchToolResultBlock["caller"];
+
+const DIRECT: Caller = { type: "direct" };
+
+// A search run by the code that filters results, under dynamic filtering.
+function fromCode(codeExecutionId: string): Caller {
+  return { type: "code_execution_20260120", tool_id: codeExecutionId };
+}
+
 // Block shapes follow a real response captured on 2026-10-01. In direct mode the API leaves out
 // `caller` on server_tool_use and `citations` on the JSON text block; the fixtures set them only
 // because the SDK types declare them.
-function searchCall(id: string, query: string): Anthropic.ServerToolUseBlock {
+function searchCall(id: string, query: string, caller = DIRECT): Anthropic.ServerToolUseBlock {
+  return { type: "server_tool_use", id, name: "web_search", input: { query }, caller };
+}
+
+function codeExecutionCall(id: string): Anthropic.ServerToolUseBlock {
   return {
     type: "server_tool_use",
     id,
-    name: "web_search",
-    input: { query },
-    caller: { type: "direct" },
+    name: "code_execution",
+    input: { code: "results = [web_search(query=q) for q in queries]" },
+    caller: DIRECT,
+  };
+}
+
+function codeExecutionResult(toolUseId: string, stdout: string): Anthropic.ContentBlock {
+  return {
+    type: "code_execution_tool_result",
+    tool_use_id: toolUseId,
+    content: { type: "code_execution_result", stdout, stderr: "", return_code: 0, content: [] },
   };
 }
 
 function searchResults(
   toolUseId: string,
   results: [url: string, title: string][],
+  caller = DIRECT,
 ): Anthropic.WebSearchToolResultBlock {
   return {
     type: "web_search_tool_result",
     tool_use_id: toolUseId,
-    caller: { type: "direct" },
+    caller,
     content: results.map(([url, title]) => ({
       type: "web_search_result",
       url,
@@ -90,6 +112,7 @@ function finding(url: string, overrides: Record<string, unknown> = {}): Record<s
     url,
     corroboratingUrls: [],
     language: "en",
+    subject: "person",
     date: "2009-03-12",
     category: "fraud",
     severity: "critical",
@@ -150,6 +173,30 @@ describe("collectSearch", () => {
 
     expect(collected.articles).toEqual([]);
     expect(collected.errors).toEqual([]);
+  });
+
+  it("collects the searches run from code execution like the direct ones", () => {
+    const collected = collectSearch([
+      codeExecutionCall("c1"),
+      searchCall("s1", '"Bernard Madoff" fraud', fromCode("c1")),
+      searchResults("s1", [[DOJ_URL, "Madoff pleads guilty"]], fromCode("c1")),
+      codeExecutionResult("c1", `kept 1 of 9 results: ${OBITUARY_URL}`),
+      searchCall("s2", '"Bernard Madoff" convicted'),
+      searchResults("s2", [[OBITUARY_URL, "Madoff dies in prison"]]),
+    ]);
+
+    expect(collected.articles.map((article) => article.url)).toEqual([DOJ_URL, OBITUARY_URL]);
+    expect(collected.queries).toEqual(['"Bernard Madoff" fraud', '"Bernard Madoff" convicted']);
+  });
+
+  it("takes no URL from the output of the filtering code", () => {
+    const collected = collectSearch([
+      codeExecutionCall("c1"),
+      codeExecutionResult("c1", `see ${INVENTED_URL}`),
+    ]);
+
+    expect(collected.articles).toEqual([]);
+    expect(collected.queries).toEqual([]);
   });
 });
 
@@ -243,6 +290,28 @@ describe("attachSources", () => {
 });
 
 describe("interpretTurn", () => {
+  it("sources the findings of a turn that searched from code execution", () => {
+    const outcome = interpretTurn([
+      message(
+        [
+          codeExecutionCall("c1"),
+          searchCall("s1", '"Bernard Madoff" fraud', fromCode("c1")),
+          searchResults("s1", [[DOJ_URL, "Madoff pleads guilty"]], fromCode("c1")),
+          codeExecutionResult("c1", "kept 1 of 9 results"),
+          assessmentText([finding(DOJ_URL)]),
+        ],
+        "end_turn",
+        1,
+      ),
+    ]);
+
+    expect(outcome.findings.map((item) => [item.url, item.title])).toEqual([
+      [DOJ_URL, "Madoff pleads guilty"],
+    ]);
+    expect(outcome.rejectedUrls).toEqual([]);
+    expect(outcome.errors).toEqual([]);
+  });
+
   it("joins a resumed pause_turn and sums the usage of both calls", () => {
     const outcome = interpretTurn([
       message([searchCall("s1", '"Bernard Madoff" fraud')], "pause_turn"),

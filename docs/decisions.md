@@ -126,8 +126,14 @@ validating URLs stays simple. The docs warn that for a few searches on a first t
 and script overhead can exceed the savings. Dynamic filtering runs on code execution containers
 kept up to 30 days and is not ZDR-eligible; direct calls are. (c) would tie a later switch to a
 change of tool version.
-Consequences: v2 measures billed input tokens with and without it on the fixtures. Switching
-requires the URL collector to read results nested under code execution blocks.
+Consequences: measured on 2026-10-01 (v2.1 in `docs/evaluation.md`), dynamic filtering left every
+risk and counted finding unchanged and cost 14% more on the three fixtures, $0.3711 to $0.4244:
++44% and +42% on the two cases with two searches, -8% on the case with five or six, within the
+run-to-run noise. Durations went from 7-12 s to 19-24 s, and output tokens rose because the model
+writes the filtering code. Direct calls stay: cheaper at this number of searches, and the only
+mode eligible for zero data retention, which a regulated institution may require. The collector
+already reads searches run from code execution, so the switch can be measured again if the number
+of searches per screening grows, for instance in daily monitoring.
 
 ### D-18 — Hand-written JSON schema with real enums, validated with zod on the client
 
@@ -303,3 +309,51 @@ Reasons: the analyst sees at once how much was read behind an empty result. A fu
 multiply the size of the result and of the page. The count is free to compute.
 Consequences: the articles themselves stay out of the result. For diagnosis, `evaluate` saves the
 full result of each fixed case in `logs/evaluation/`, and the run log keeps the count.
+
+### D-28 — Each finding says who it is about; a finding about an associate never counts
+
+Context: in the native-only measurement, an article about the screened mayor's partner, with
+"association only" in its evidence, came back at medium identity and was counted. The prompt asked
+for a low rating; the model followed it in one run out of two.
+Options: (a) rely on the prompt; (b) match "association only" in `identityEvidence` in code; (c) a
+schema field `subject: person | organization | associate`, with associate findings never counted
+in `score.ts`.
+Decision: (c).
+Reasons: who an article is about is a fact the model reads, and the grammar makes it state it for
+every finding. Excluding a kind of finding from the risk is a scoring rule, so it belongs to code,
+where it is deterministic and tested. (b) would depend on free text.
+Consequences: associate findings stay visible to the analyst. A finding about an organization
+counts like one about the person, through its identity confidence. The homonym rule of D-23 ignores
+associate findings, which are not homonyms. Runs from v2.2 final on carry the new schema.
+
+### D-29 — Prompt caching on the static prefix
+
+Context: every screening sends the same system prompt and output schema, and the server-side search
+loop rereads the prefix and the earlier search results at each iteration.
+Options: (a) no caching; (b) top-level automatic caching; (c) an explicit breakpoint on the last
+static block.
+Decision: (c), on the system block. The tool definition comes first and carries `user_location`,
+so a breakpoint on it would cover a few hundred tokens that vary by country. (b) would place the
+breakpoint on the user message, which changes with every screening.
+Reasons: measured on the five cases (v2.3 in `docs/evaluation.md`): −15%, $0.4220 to $0.3573, with
+the same searches and results. The saving comes from reads inside each turn at a tenth of the input
+price, including the search results that the API caches between iterations once a breakpoint
+exists.
+Consequences: the prefix, about 4,900 tokens, is written at 1.25 times the input price by every
+screening that does not find it warm. It is shared only between screenings of one country within
+five minutes, so a daily batch should group screenings by country (about $0.011 saved per warm
+hit). Effort and thinking settings stay fixed, since changing them invalidates the cache.
+
+### D-30 — The search runs at medium effort
+
+Context: Sonnet 5.5 defaults to high effort. Effort steers every output token, tool calls included.
+Options: (a) high, the default; (b) medium; (c) low.
+Decision: (b).
+Reasons: measured on the five cases (v2.4 in `docs/evaluation.md`): −18%, $0.3573 to $0.2919,
+output tokens −26%, every planned query executed, same risks and counted findings. The clean case
+skipped the free search that made its cost vary. (c) was not tested: the docs state that lower
+effort means fewer tool calls, and a screening must run all of its planned searches.
+Consequences: fewer free searches. On a truly ambiguous identity, the model may skip the search that
+would settle it, a situation the fixtures do not cover; the completeness check catches a skipped
+planned query, not a skipped free one. The value is a constant, since changing it invalidates the
+cache.

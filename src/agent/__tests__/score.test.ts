@@ -16,6 +16,7 @@ function finding(overrides: Partial<AssessedFinding> = {}): AssessedFinding {
     title: "Article",
     date: "2020-06-01",
     language: "fr",
+    subject: "person",
     category: "fraud",
     severity: "critical",
     status: "investigation",
@@ -131,6 +132,35 @@ describe("score", () => {
       regulatory.url,
       homonym.url,
     ]);
+  });
+});
+
+describe("subject", () => {
+  it("never counts a finding about an associate, even a conviction at high identity", () => {
+    const result = score(
+      [finding({ subject: "associate", category: "organized_crime", status: "conviction" })],
+      true,
+      SCREENED_AT,
+    );
+
+    expect(result.risk).toBe("low");
+    expect(result.findings.map((item) => item.countedInScore)).toEqual([false]);
+  });
+
+  it("does not let an associate lower the confidence of the person's own findings", () => {
+    const associate = finding({ url: "https://corsematin.com/a", subject: "associate" });
+
+    expect(
+      score([finding(), { ...associate, identityConfidence: "medium" }], true, SCREENED_AT),
+    ).toMatchObject({ risk: "high", confidence: "high" });
+  });
+
+  it("keeps the confidence high when the only critical finding is about an associate", () => {
+    expect(score([finding({ subject: "associate" })], true, SCREENED_AT).confidence).toBe("high");
+  });
+
+  it("counts a finding about an organization linked to the person", () => {
+    expect(score([finding({ subject: "organization" })], true, SCREENED_AT).risk).toBe("high");
   });
 });
 

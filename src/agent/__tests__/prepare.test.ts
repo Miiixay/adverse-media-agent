@@ -8,6 +8,7 @@ import {
   buildQueries,
   languagesFor,
   nameVariants,
+  parseQueriesPerLanguage,
   prepare,
 } from "../prepare";
 
@@ -58,15 +59,14 @@ describe("nameVariants", () => {
 });
 
 describe("buildQueries", () => {
-  it("builds a financial crime query and a criminal justice query per language", () => {
+  it("builds one query per language, native first", () => {
     const languages = buildQueries("Jean Martin", ["fr", "en"]).map((query) => query.language);
-    expect(languages).toEqual(["fr", "fr", "en", "en"]);
+    expect(languages).toEqual(["fr", "en"]);
   });
 
-  it("quotes the full name and the multi-word keywords", () => {
+  it("keeps the first term of each offence category and every proceedings term", () => {
     expect(buildQueries("Jean Martin", ["fr"]).map((query) => query.text)).toEqual([
-      `"Jean Martin" fraude OR escroquerie OR blanchiment OR corruption OR pots-de-vin OR sanctions`,
-      `"Jean Martin" terrorisme OR "crime organisé" OR mafia OR agression OR meurtre OR condamnation OR "mise en examen" OR procès`,
+      `"Jean Martin" fraude OR blanchiment OR corruption OR sanctions OR terrorisme OR "crime organisé" OR agression OR condamnation OR "mise en examen" OR procès`,
     ]);
   });
 });
@@ -75,14 +75,14 @@ describe("prepare", () => {
   it("plans native and English queries for a supported country", () => {
     const plan = prepare({ firstName: "Jean", lastName: "Martin", country: "FR" });
     expect(plan.countrySupported).toBe(true);
-    expect(plan.queries).toHaveLength(4);
+    expect(plan.queries).toHaveLength(2);
     expect(plan.queries.every((query) => query.text.startsWith(`"Jean Martin" `))).toBe(true);
   });
 
   it("searches in English only and flags a country missing from the table", () => {
     const plan = prepare({ firstName: "Jean", lastName: "Martin", country: "ZZ" });
     expect(plan.countrySupported).toBe(false);
-    expect(plan.queries.map((query) => query.language)).toEqual(["en", "en"]);
+    expect(plan.queries.map((query) => query.language)).toEqual(["en"]);
   });
 
   it("queries the name with its diacritics and keeps the folded form as a variant", () => {
@@ -92,7 +92,11 @@ describe("prepare", () => {
   });
 
   it("collapses whitespace and composes decomposed accents", () => {
-    const plan = prepare({ firstName: "  Éric ", lastName: "Müller  ", country: "DE" });
+    const plan = prepare({
+      firstName: "  Éric ".normalize("NFD"),
+      lastName: "Müller  ".normalize("NFD"),
+      country: "DE",
+    });
     expect(plan.nameVariants[0]).toBe("Éric Müller");
   });
 });
@@ -107,23 +111,51 @@ describe("search budget", () => {
     }
   });
 
-  it("keeps two queries per language when the plan fits", () => {
-    const queries = buildQueries("Anna Keller", ["nl", "fr", "en"]);
-    expect(queries.map((query) => query.language)).toEqual(["nl", "nl", "fr", "fr", "en", "en"]);
+  it("refuses more languages than the queries the budget allows", () => {
+    const languages = ["de", "fr", "it", "nl", "pl", "sv", "en"] as const;
+    expect(() => buildQueries("Anna Keller", languages)).toThrow(/over the budget/);
   });
+});
 
-  it("merges native languages into one query each, starting from the last", () => {
-    const queries = buildQueries("Anna Keller", ["de", "fr", "it", "en"]);
-    expect(queries.map((query) => query.language)).toEqual(["de", "de", "fr", "it", "en", "en"]);
-    const italian = queries.find((query) => query.language === "it");
-    expect(italian?.text).toContain("riciclaggio");
-    expect(italian?.text).toContain("condanna");
-  });
-
-  it("refuses languages that cannot fit even with every native language merged", () => {
-    expect(() => buildQueries("Anna Keller", ["de", "fr", "it", "nl", "pl", "en"])).toThrow(
-      /over the budget/,
+describe("spelling variants", () => {
+  it("searches the British and American spellings together", () => {
+    expect(buildQueries("David Smith", ["en"])[0]?.text).toContain(
+      `"organized crime" OR "organised crime"`,
     );
+  });
+});
+
+describe("queries per language switch", () => {
+  it("replays the two v1 queries per language word for word", () => {
+    expect(buildQueries("Jean Martin", ["fr", "en"], 2).map((query) => query.text)).toEqual([
+      `"Jean Martin" fraude OR escroquerie OR blanchiment OR corruption OR pots-de-vin OR sanctions`,
+      `"Jean Martin" terrorisme OR "crime organisé" OR mafia OR agression OR meurtre OR condamnation OR "mise en examen" OR procès`,
+      `"Jean Martin" fraud OR embezzlement OR "money laundering" OR corruption OR bribery OR sanctions`,
+      `"Jean Martin" terrorism OR "organized crime" OR "organised crime" OR assault OR murder OR convicted OR indicted OR arrested`,
+    ]);
+  });
+
+  it("gives native languages a single query over budget, from the last listed, as v1 did", () => {
+    const languages = buildQueries("Anna Keller", ["de", "fr", "it", "en"], 2).map(
+      (query) => query.language,
+    );
+    expect(languages).toEqual(["de", "de", "fr", "it", "en", "en"]);
+  });
+
+  it("leaves the reserved free searches for every country in both configurations", () => {
+    for (const country of COUNTRY_LANGUAGES.keys()) {
+      const plan = prepare({ firstName: "Anna", lastName: "Keller", country }, 2);
+      expect(plan.queries.length, country).toBeLessThanOrEqual(
+        MAX_SEARCHES - RESERVED_FREE_SEARCHES,
+      );
+    }
+  });
+
+  it("reads 1 by default, 2 on request, and refuses anything else", () => {
+    expect(parseQueriesPerLanguage(undefined)).toBe(1);
+    expect(parseQueriesPerLanguage("")).toBe(1);
+    expect(parseQueriesPerLanguage("2")).toBe(2);
+    expect(() => parseQueriesPerLanguage("3")).toThrow(/QUERIES_PER_LANGUAGE/);
   });
 });
 
