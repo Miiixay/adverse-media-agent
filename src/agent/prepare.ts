@@ -1,3 +1,4 @@
+import type { QueriesPerLanguage } from "./config";
 import { COUNTRY_LANGUAGES } from "./data/country-languages";
 import {
   NEGATIVE_KEYWORDS,
@@ -5,10 +6,6 @@ import {
   type KeywordCategory,
 } from "./data/negative-keywords";
 import type { Language, ScreeningInput, SearchPlan, SearchQuery } from "./types";
-
-// A measurement switch, not a product setting: 2 replays the v1 plan, two queries per language,
-// so that v1 and v2 can be compared on the same code (v2.2 in docs/evaluation.md).
-export type QueriesPerLanguage = 1 | 2;
 
 export const MAX_SEARCHES = 8;
 // Searches kept out of the plan so the model can settle an identity doubt or try another form
@@ -34,17 +31,12 @@ const PROCEEDINGS_TERMS = 2;
 const REGULATORY_CIVIL_TERMS = 3;
 
 // The search engine binds a quoted name only to the term right after it: "Name" a OR b reads as
-// ("Name" a) OR b, so each clause repeats the name (D-39). Clauses are added in order while the
-// query stays within these limits. Brave's API reference gives 600 characters and 75 words for its
-// query, older documentation 400 and 50; Anthropic documents query_too_long without a figure.
+// ("Name" a) OR b, so each clause repeats the name (D-39), and no search operator does better
+// (D-48). Clauses are added in order while the query stays within these limits. Brave's API
+// reference gives 600 characters and 75 words for its query, older documentation 400 and 50;
+// Anthropic documents query_too_long without a figure.
 export const MAX_QUERY_CHARACTERS = 380;
 export const MAX_QUERY_WORDS = 48;
-
-// The v1 plan: financial crime apart from general criminal and judicial coverage.
-const SPLIT_GROUPS: readonly (readonly KeywordCategory[])[] = [
-  ["fraud", "money_laundering", "corruption", "sanctions"],
-  ["terrorism", "organized_crime", "violence", "legal_proceedings"],
-];
 
 // Letters that Unicode NFD does not split into a base letter and a combining mark.
 const UNDECOMPOSABLE_LETTERS: Readonly<Record<string, string>> = {
@@ -78,12 +70,6 @@ export function prepare(
     nameVariants: nameVariants(firstName, lastName),
     queries: buildQueries(`${firstName} ${lastName}`, languages, queriesPerLanguage),
   };
-}
-
-export function parseQueriesPerLanguage(value: string | undefined): QueriesPerLanguage {
-  if (value === undefined || value === "" || value === "1") return 1;
-  if (value === "2") return 2;
-  throw new Error(`QUERIES_PER_LANGUAGE must be 1 or 2, got "${value}"`);
 }
 
 export function languagesFor(country: string): Pick<SearchPlan, "languages" | "countrySupported"> {
@@ -125,23 +111,6 @@ export function buildQueries(
   );
 }
 
-// Over budget, the v1 plan gives native languages a single query, starting from the last listed:
-// the first language carries the most press and English covers the international press (D-20).
-function languagesKeptSplit(languages: readonly Language[]): Set<Language> {
-  const split = new Set(languages);
-  let plannedQueries = languages.length * SPLIT_GROUPS.length;
-  const unsplitOrder = [
-    ...languages.filter((language) => language !== INTERNATIONAL_LANGUAGE).reverse(),
-    INTERNATIONAL_LANGUAGE,
-  ];
-  for (const language of unsplitOrder) {
-    if (plannedQueries <= QUERY_BUDGET) break;
-    split.delete(language);
-    plannedQueries -= SPLIT_GROUPS.length - 1;
-  }
-  return split;
-}
-
 function singleQueryTerms(language: Language): string[] {
   const keywords = NEGATIVE_KEYWORDS[language];
   const terms = [
@@ -151,10 +120,6 @@ function singleQueryTerms(language: Language): string[] {
     ...keywords.regulatory_civil.slice(0, REGULATORY_CIVIL_TERMS),
   ];
   return [...new Set(terms)];
-}
-
-function splitTerms(language: Language, categories: readonly KeywordCategory[]): string[] {
-  return categories.flatMap((category) => NEGATIVE_KEYWORDS[language][category]);
 }
 
 // "Name" t1 OR "Name" t2 OR ...: a long name keeps fewer clauses. The first clause stays whatever
@@ -172,7 +137,6 @@ function queryText(fullName: string, terms: readonly string[]): string {
   return query;
 }
 
-// Names are normalized to single spaces, and terms hold single spaces: words are space-separated.
 export function withinQueryLimits(query: string): boolean {
   return query.length <= MAX_QUERY_CHARACTERS && query.split(" ").length <= MAX_QUERY_WORDS;
 }
@@ -218,4 +182,33 @@ function uniqueIgnoringCase(values: readonly string[]): string[] {
     seen.add(key);
     return true;
   });
+}
+
+// Measurement only: the v1 plan, two queries per language (QUERIES_PER_LANGUAGE=2).
+
+// Financial crime apart from general criminal and judicial coverage.
+const SPLIT_GROUPS: readonly (readonly KeywordCategory[])[] = [
+  ["fraud", "money_laundering", "corruption", "sanctions"],
+  ["terrorism", "organized_crime", "violence", "legal_proceedings"],
+];
+
+// Over budget, the v1 plan gives native languages a single query, starting from the last listed:
+// the first language carries the most press and English covers the international press (D-20).
+function languagesKeptSplit(languages: readonly Language[]): Set<Language> {
+  const split = new Set(languages);
+  let plannedQueries = languages.length * SPLIT_GROUPS.length;
+  const unsplitOrder = [
+    ...languages.filter((language) => language !== INTERNATIONAL_LANGUAGE).reverse(),
+    INTERNATIONAL_LANGUAGE,
+  ];
+  for (const language of unsplitOrder) {
+    if (plannedQueries <= QUERY_BUDGET) break;
+    split.delete(language);
+    plannedQueries -= SPLIT_GROUPS.length - 1;
+  }
+  return split;
+}
+
+function splitTerms(language: Language, categories: readonly KeywordCategory[]): string[] {
+  return categories.flatMap((category) => NEGATIVE_KEYWORDS[language][category]);
 }

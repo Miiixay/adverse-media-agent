@@ -6,6 +6,7 @@ import { listDailyCandidates, saveScreening, type DailyCandidate } from "@/db/sc
 import { errorLabel, logRun, runLogKey } from "../../server-log";
 import {
   DAILY_CONCURRENCY,
+  parseMaxDailyScreenings,
   planDailyRun,
   runWithinBudget,
   summarizeDailyRun,
@@ -23,14 +24,16 @@ const SAVE_MARGIN_MS = 15_000;
 // function. With 240 s for the agent, new screenings start during the first 45 s only.
 const START_CUTOFF_MS = MAX_DURATION_MS - SEARCH_TIME_BUDGET_MS - SAVE_MARGIN_MS;
 
-// Called once a day by Vercel Cron. Re-screens every recorded person, stores a daily screening
-// with only the findings whose URL is new for that person, and answers with a summary.
+// Called once a day by Vercel Cron. Re-screens the monitored persons, at most MAX_DAILY_SCREENINGS,
+// stores a daily screening with only the findings whose URL is new for that person, and answers
+// with a summary.
 export async function GET(request: Request): Promise<Response> {
   if (!cronAuthorized(request.headers.get("authorization"), process.env.CRON_SECRET)) {
     return Response.json({ error: "unauthorized" }, { status: 401 });
   }
   const startedAt = Date.now();
   const pseudonymKey = runLogKey();
+  const maxScreenings = parseMaxDailyScreenings(process.env.MAX_DAILY_SCREENINGS);
 
   let candidates: DailyCandidate[];
   try {
@@ -40,7 +43,7 @@ export async function GET(request: Request): Promise<Response> {
     return Response.json({ error: "the database did not answer" }, { status: 503 });
   }
 
-  const plan = planDailyRun(candidates, new Date(startedAt));
+  const plan = planDailyRun(candidates, new Date(startedAt), maxScreenings);
   const { results, notStarted } = await runWithinBudget(
     plan.toScreen,
     DAILY_CONCURRENCY,

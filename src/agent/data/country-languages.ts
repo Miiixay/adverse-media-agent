@@ -2,7 +2,7 @@ import type { Language } from "../types";
 
 // Languages in which each country's national press publishes at scale, not every official
 // language: German in Belgium, Romansh in Switzerland, Luxembourgish and Irish are left out so the
-// search budget goes to the languages that carry adverse media. prepare() adds English.
+// search budget goes to the languages that carry adverse media (D-19). prepare() adds English.
 export const COUNTRY_LANGUAGES: ReadonlyMap<string, readonly Language[]> = new Map([
   ["AT", ["de"]],
   ["BE", ["nl", "fr"]],

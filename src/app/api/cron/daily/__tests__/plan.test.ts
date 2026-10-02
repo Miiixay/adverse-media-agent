@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { DailyCandidate } from "@/db/screenings";
 
 import {
+  parseMaxDailyScreenings,
   planDailyRun,
   runWithinBudget,
   summarizeDailyRun,
@@ -206,5 +207,48 @@ describe("summarizeDailyRun", () => {
 
     expect(summary.notReached).toBe(1);
     expect(summary.note).toContain("1 not reached within the time budget");
+  });
+});
+
+describe("MAX_DAILY_SCREENINGS", () => {
+  it("reads 20 by default and refuses anything but a positive integer", () => {
+    expect(parseMaxDailyScreenings(undefined)).toBe(20);
+    expect(parseMaxDailyScreenings("")).toBe(20);
+    expect(parseMaxDailyScreenings("5")).toBe(5);
+    for (const value of ["0", "-1", "2.5", "twenty"]) {
+      expect(() => parseMaxDailyScreenings(value)).toThrow(/MAX_DAILY_SCREENINGS/);
+    }
+  });
+
+  it("screens the first persons in order up to the cap and defers the others", () => {
+    const plan = planDailyRun(
+      [
+        candidate("recent", "2026-10-01T05:10:00Z"),
+        candidate("never", null),
+        candidate("older", "2026-09-30T05:10:00Z"),
+      ],
+      NOW,
+      2,
+    );
+
+    expect(plan.toScreen.map((person) => person.id)).toEqual(["never", "older"]);
+    expect(plan.deferred.map((person) => person.id)).toEqual(["recent"]);
+  });
+
+  it("gives the cap and the deferred persons in the summary", () => {
+    const plan = planDailyRun([candidate("a", null), candidate("b", null)], NOW, 1);
+    const outcome: PersonOutcome = {
+      personId: "a",
+      outcome: "screened",
+      screeningId: "screening-a",
+      risk: "low",
+      status: "complete",
+      newFindings: 0,
+      costUsd: 0.05,
+    };
+    const summary = summarizeDailyRun(plan, [outcome], []);
+
+    expect(summary).toMatchObject({ persons: 2, maxScreenings: 1, screened: 1, deferred: 1 });
+    expect(summary.note).toContain("1 over the cap of MAX_DAILY_SCREENINGS=1");
   });
 });

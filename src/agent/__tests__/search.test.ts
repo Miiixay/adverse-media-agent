@@ -1,6 +1,7 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import { describe, expect, it } from "vitest";
 
+import { parseEffort, parseModel } from "../config";
 import { PROMPT_CANARY } from "../prompts";
 import { AssessmentSchema } from "../schema";
 import {
@@ -8,11 +9,9 @@ import {
   collectSearch,
   interpretTurn,
   isBlockedDomain,
-  isFlooded,
+  floodCheck,
   leaksCanary,
   parseAssessment,
-  parseEffort,
-  parseModel,
 } from "../search";
 
 type Caller = Anthropic.WebSearchToolResultBlock["caller"];
@@ -137,12 +136,23 @@ function finding(url: string, overrides: Record<string, unknown> = {}): Record<s
 }
 
 function assessmentText(findings: Record<string, unknown>[]): Anthropic.TextBlock {
-  return text(JSON.stringify({ findings, summary: "Convicted for a Ponzi scheme.", aliases: [] }));
+  return text(
+    JSON.stringify({
+      findings,
+      suggestedRisk: "High",
+      summary: "Convicted for a Ponzi scheme.",
+      aliases: [],
+    }),
+  );
 }
 
 function assessedFindings(findings: Record<string, unknown>[]) {
-  return AssessmentSchema.parse({ findings, summary: "Convicted for a Ponzi scheme.", aliases: [] })
-    .findings;
+  return AssessmentSchema.parse({
+    findings,
+    suggestedRisk: "high",
+    summary: "Convicted for a Ponzi scheme.",
+    aliases: [],
+  }).findings;
 }
 
 describe("collectSearch", () => {
@@ -158,8 +168,8 @@ describe("collectSearch", () => {
     ]);
 
     expect(collected.articles).toEqual([
-      { url: DOJ_URL, title: "Madoff pleads guilty", pageAge: "221 days ago" },
-      { url: OBITUARY_URL, title: "Madoff dies in prison", pageAge: "221 days ago" },
+      { url: DOJ_URL, title: "Madoff pleads guilty" },
+      { url: OBITUARY_URL, title: "Madoff dies in prison" },
     ]);
     expect(collected.queries).toEqual(['"Bernard Madoff" fraud', '"Bernard Madoff" convicted']);
     expect(collected.errors).toEqual([]);
@@ -266,7 +276,7 @@ describe("parseAssessment", () => {
 describe("attachSources", () => {
   it("drops findings whose URL is not among the search results", () => {
     const sourced = attachSources(assessedFindings([finding(DOJ_URL), finding(INVENTED_URL)]), [
-      { url: DOJ_URL, title: "Madoff pleads guilty", pageAge: null },
+      { url: DOJ_URL, title: "Madoff pleads guilty" },
     ]);
 
     expect(sourced.findings.map((item) => [item.url, item.title])).toEqual([
@@ -281,7 +291,7 @@ describe("attachSources", () => {
         finding(DOJ_URL, { severity: "critical" }),
         finding(DOJ_URL, { severity: "minor" }),
       ]),
-      [{ url: DOJ_URL, title: "Madoff pleads guilty", pageAge: null }],
+      [{ url: DOJ_URL, title: "Madoff pleads guilty" }],
     );
 
     expect(sourced.findings.map((item) => item.severity)).toEqual(["critical"]);
@@ -293,7 +303,7 @@ describe("attachSources", () => {
       assessedFindings([
         finding(DOJ_URL, { corroboratingUrls: [DOJ_URL, INVENTED_URL, ...others, ...others] }),
       ]),
-      [DOJ_URL, ...others].map((url) => ({ url, title: "Madoff", pageAge: null })),
+      [DOJ_URL, ...others].map((url) => ({ url, title: "Madoff" })),
     );
 
     expect(sourced.findings[0]?.corroboratingUrls).toEqual(others.slice(0, 3));
@@ -310,7 +320,7 @@ describe("URL scheme", () => {
         finding(script),
         finding(DOJ_URL, { corroboratingUrls: [page, OBITUARY_URL] }),
       ]),
-      [script, page, DOJ_URL, OBITUARY_URL].map((url) => ({ url, title: "Madoff", pageAge: null })),
+      [script, page, DOJ_URL, OBITUARY_URL].map((url) => ({ url, title: "Madoff" })),
     );
 
     expect(sourced.findings.map((item) => [item.url, item.corroboratingUrls])).toEqual([
@@ -353,7 +363,7 @@ describe("blocked domains", () => {
         finding(post),
         finding(DOJ_URL, { corroboratingUrls: [thread, OBITUARY_URL] }),
       ]),
-      [post, thread, DOJ_URL, OBITUARY_URL].map((url) => ({ url, title: "Madoff", pageAge: null })),
+      [post, thread, DOJ_URL, OBITUARY_URL].map((url) => ({ url, title: "Madoff" })),
     );
 
     expect(sourced.findings.map((item) => [item.url, item.corroboratingUrls])).toEqual([
@@ -367,11 +377,11 @@ describe("blocked domains", () => {
       [
         ...Array.from({ length: blocked }, (_, index) => `https://x.com/post/${index}`),
         ...Array.from({ length: others }, (_, index) => `https://www.lemonde.fr/article/${index}`),
-      ].map((url) => ({ url, title: "Post", pageAge: null }));
+      ].map((url) => ({ url, title: "Post" }));
 
-    expect(isFlooded(articles(6, 4))).toBe(true);
-    expect(isFlooded(articles(5, 5))).toBe(false);
-    expect(isFlooded([])).toBe(false);
+    expect(floodCheck(articles(6, 4))?.code).toBe("flooded");
+    expect(floodCheck(articles(5, 5))).toBeNull();
+    expect(floodCheck([])).toBeNull();
   });
 
   it("reports a flooded search in the coverage errors", () => {
@@ -403,6 +413,7 @@ describe("aliases", () => {
     const answer = text(
       JSON.stringify({
         findings: [finding(DOJ_URL)],
+        suggestedRisk: "high",
         summary: "Convicted for a Ponzi scheme.",
         aliases: ["Bernie Madoff", "B. Madoff", "Bernard L. Madoff", "Bernie"],
       }),
@@ -435,6 +446,7 @@ describe("canary", () => {
     const leakedSummary = text(
       JSON.stringify({
         findings: [finding(DOJ_URL)],
+        suggestedRisk: "low",
         summary: `Marker ${PROMPT_CANARY}.`,
         aliases: [],
       }),
@@ -497,6 +509,7 @@ describe("interpretTurn", () => {
     expect(outcome.findings.map((item) => item.url)).toEqual([DOJ_URL]);
     expect(outcome.errors).toEqual([]);
     expect(outcome.apiCalls).toBe(2);
+    expect(outcome.suggestedRisk).toBe("high");
     expect(outcome.usage).toMatchObject({ inputTokens: 2000, outputTokens: 200, webSearches: 1 });
   });
 
@@ -513,6 +526,7 @@ describe("interpretTurn", () => {
     const outcome = interpretTurn([refused]);
 
     expect(outcome.summary).toBeNull();
+    expect(outcome.suggestedRisk).toBeNull();
     expect(outcome.findings).toEqual([]);
     expect(outcome.articles).toHaveLength(1);
     expect(outcome.errors).toEqual([

@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   CATEGORIES,
   CONFIDENCE_LEVELS,
+  RISK_LEVELS,
   SEVERITIES,
   SOURCE_RELIABILITIES,
   STATUSES,
@@ -23,9 +24,9 @@ export const MAX_ALIASES = 3;
 export const ASSESSMENT_JSON_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  // Written in this order under constrained decoding: the findings, then the summary that describes
-  // them, then the aliases (D-44).
-  required: ["findings", "summary", "aliases"],
+  // Written in this order under constrained decoding: the findings, then the model's view of the
+  // risk they add up to, then the summary that describes them, then the aliases (D-44, D-51).
+  required: ["findings", "suggestedRisk", "summary", "aliases"],
   properties: {
     findings: {
       type: "array",
@@ -81,6 +82,12 @@ export const ASSESSMENT_JSON_SCHEMA = {
         },
       },
     },
+    suggestedRisk: {
+      type: "string",
+      enum: RISK_LEVELS,
+      description:
+        "Your own view of the person's overall risk, low, medium or high, from the findings you report and the definitions of identityConfidence, category, severity and status in these instructions. The final risk level is calculated elsewhere: your view is recorded as an opinion and does not change it.",
+    },
     summary: {
       type: "string",
       description:
@@ -120,6 +127,7 @@ export const AssessmentSchema = z.object({
       summary: z.string(),
     }),
   ),
+  suggestedRisk: caseInsensitiveEnum(RISK_LEVELS),
   summary: z.string(),
   aliases: z.array(z.string()),
 });

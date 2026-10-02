@@ -1,5 +1,7 @@
+import { addUsage } from "./cost";
 import { screeningInputSchema } from "./schema";
-import type { AssessedFinding, ScreeningInput, SearchOutcome, Status, TokenUsage } from "./types";
+import { higherRisk } from "./score";
+import type { AssessedFinding, ScreeningInput, SearchOutcome, Status } from "./types";
 
 // The stages one matter goes through, each final outcome last. Two statuses of different stages
 // can be one matter seen at two moments; unclear has no stage.
@@ -68,6 +70,8 @@ export function mergeOutcomes(
   const read = new Set(primary.articles.map((article) => article.url));
   return {
     summary: joinSummaries(primary.summary, alias.summary, aliasName),
+    // Each turn judged the matters it found about the same person: the higher view stands.
+    suggestedRisk: higherRisk(primary.suggestedRisk, alias.suggestedRisk),
     findings: mergeFindings(primary.findings, alias.findings),
     rejectedUrls: [...new Set([...primary.rejectedUrls, ...alias.rejectedUrls])],
     articles: [...primary.articles, ...alias.articles.filter((article) => !read.has(article.url))],
@@ -138,15 +142,4 @@ function joinSummaries(
   if (alias === null) return primary;
   const underAlias = `Under the name ${aliasName}: ${alias}`;
   return primary === null ? underAlias : `${primary} ${underAlias}`;
-}
-
-function addUsage(a: TokenUsage, b: TokenUsage): TokenUsage {
-  return {
-    inputTokens: a.inputTokens + b.inputTokens,
-    outputTokens: a.outputTokens + b.outputTokens,
-    cacheReadTokens: a.cacheReadTokens + b.cacheReadTokens,
-    cacheWrite5mTokens: a.cacheWrite5mTokens + b.cacheWrite5mTokens,
-    cacheWrite1hTokens: a.cacheWrite1hTokens + b.cacheWrite1hTokens,
-    webSearches: a.webSearches + b.webSearches,
-  };
 }

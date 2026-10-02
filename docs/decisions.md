@@ -5,6 +5,7 @@ taken. Entries marked "decided by measurement" point to the tables in `docs/eval
 
 ### D-01 — Orchestrated workflow in code, not an autonomous agent or a framework
 
+Date: 2026-10-01.
 Context: AML screening. Results must be auditable, cost must be bounded, homonyms must be
 handled explicitly.
 Options: (a) an autonomous agent that plans and searches on its own; (b) a workflow in plain
@@ -19,6 +20,7 @@ to (c) when the graph needs persisted state, resume on failure or complex loops.
 
 ### D-02 — TypeScript everywhere, one repository, modular monolith
 
+Date: 2026-10-01.
 Context: a Next.js app must call the agent, Vercel runs JavaScript natively, the deadline is
 two days.
 Options: (a) a Python agent as a separate service behind an HTTP API; (b) a TypeScript agent as a
@@ -30,6 +32,7 @@ Consequences: the agent must stay framework-agnostic to remain extractable later
 
 ### D-03 — Deterministic in code, judgment in the LLM
 
+Date: 2026-10-01.
 Context: the LLM is a non-deterministic component. Compliance needs reproducibility, and every
 token costs money.
 Options: (a) let the model do everything: languages, queries, judgment, scoring; (b) split the
@@ -44,6 +47,7 @@ Consequences: language and keyword tables to maintain. The split is visible in t
 
 ### D-04 — Final risk computed in code, never by the LLM
 
+Date: 2026-10-01.
 Context: the risk level is what an analyst acts on. It must be explainable and stable across
 model and prompt versions.
 Options: (a) the model returns `low | medium | high`; (b) the model qualifies each article and a
@@ -56,6 +60,7 @@ Every finding carries `countedInScore` so the analyst sees what drove the level.
 
 ### D-05 — Explicit identity resolution with a confidence level; `low` never counts
 
+Date: 2026-10-01.
 Context: common names return articles about other people. A false positive blocks a legitimate
 customer, a false negative is a regulatory risk.
 Options: (a) trust that the search results are about the person; (b) ask the model, per article,
@@ -69,8 +74,58 @@ fixture "Jean Martin, FR" tests exactly this.
 Consequences: more output tokens per article. `medium` and `high` results are still validated by
 a human.
 
+### D-06 — Claude's web search tool rather than a dedicated search provider
+
+Date: 2026-10-01.
+Context: the agent must search the open web in several languages. Claude offers a server-side web
+search tool; dedicated search APIs, general or news-only, can also be called from code.
+Options: (a) the `web_search` server tool, run by the API inside the model call; (b) a search API
+called by our code, its results passed to the model, for instance as a client tool.
+Decision: (a).
+Reasons: one call searches and assesses (D-08), with no second vendor, key or contract. Searches are
+billed with the call, $10 per 1,000 plus the tokens of their results. The tool takes `max_uses`,
+`user_location` and domain filters, and stays eligible for zero data retention when called directly
+(D-17). Its behaviour is measured on the fixtures like the rest of the agent.
+Consequences: the engine cannot be tuned. It returns about ten results per query, has no date
+filter, and search operators do not help (D-48); a quoted name binds to one term only, hence the
+query form of D-39. A date window for the daily run and a news index need (b), next step 2 in
+`docs/architecture.md`.
+
+### D-07 — One call localized with `user_location`, not a native call and an international call
+
+Date: 2026-10-01.
+Context: the brief asks for the native language and English. `user_location.country` steers the
+results of the whole call toward the country.
+Options: (a) one call localized to the country, with a native query and an English query; (b) two
+calls, one localized for the native queries and one without location for English.
+Decision: (a), with (b) to measure if the native cases failed.
+Reasons: (a) pays the fixed cost of a call once, writes one cached prefix, and lets one assessment
+see the articles of every language together, so that one matter becomes one finding (D-22). (b)
+doubles that fixed cost.
+Consequences: the comparison was never needed: the native cases find their convictions through the
+native query, and the seventeen cases pass with one localized call. Whether an English query
+without location would add international coverage is not measured. Countries outside the language
+table are searched in English without location.
+
+### D-08 — One call searches and returns the structured assessment
+
+Date: 2026-10-01.
+Context: the model must run the searches, then return findings that fit a JSON schema. No page of
+the docs says whether `output_config.format` works together with the web search server tool.
+Options: (a) one call with web search and `output_config.format`; (b) two calls: search and a
+text synthesis with citations, then a JSON extraction without tools, possibly on Haiku 4.5.
+Decision: (a) for v1.
+Reasons: a probe on 2026-10-01 showed the API accepts the combination: HTTP 200, JSON that fits a
+schema with real enums, every finding URL among the search results, $0.067 for two searches.
+Search results are read once. (b) sends the synthesis again to a second call, and its saving is
+on output tokens, 14% of the probe's cost.
+Consequences: two-step remains a v2 measurement. In structured mode the text block carries no
+citations, so the source shown to the analyst is each finding's URL. `page_age` is a relative
+"last updated" string, so a finding's date comes from the model's reading of the article.
+
 ### D-09 — Claude Sonnet 5.5 for v1, Opus 5.5 as the measured comparison
 
+Date: 2026-10-01.
 Context: the search step needs a model that supports web search with dynamic filtering (Claude
 4.6+), judges identity reliably, and keeps the cost per screening bounded.
 Options: (a) `claude-sonnet-5-5`, $2 / $10 per million input / output tokens; (b)
@@ -107,8 +162,94 @@ prompts differ by the definition of `investigation`, which bears on none of the 
 The criterion set beforehand, two of four points improved without a change of risk, is met on the
 alias and the dates, with the Wikipedia matters improved in the summary only.
 
+### D-10 — Search and output limits, retries and time budget
+
+Date: 2026-10-01.
+Context: the cost and the duration of a screening must be bounded, and the synchronous API route
+runs under the 300 s limit of Vercel's Hobby plan.
+Options: the SDK defaults (two retries, a 10-minute timeout, no cap on searches), or explicit
+limits.
+Decision: `max_uses` = `MAX_SEARCHES` = 8, two of them left to the model (D-20); `max_tokens` =
+8,000; at most 3 continuations of a paused turn; `maxRetries: 0` on the search call; one budget of
+240 s for the whole turn, each request getting what remains of it. A timeout becomes a `timeout`
+coverage error and the result is incomplete.
+Reasons: a retried request whose answer never arrived would run and bill its searches again. 240 s
+leaves 60 s for scoring and the response. The first Madoff run used 2 searches and 2,522 output
+tokens, well under both caps.
+Consequences: in recall, a person with many matters can exhaust the searches, which shows as
+`max_uses_exceeded`. A transient 429 or 5xx fails the screening at once instead of being retried.
+The usage of a request cut by the timeout is unknown although it may be billed. The values are
+revisited with the v2 measurements.
+
+### D-11 — Synchronous screening in the prototype, a job queue in the target
+
+Date: 2026-10-01.
+Context: a screening takes 5 to 12 s on the fixed cases, up to about a minute with a second turn.
+On the Hobby plan Vercel stops a function after 300 s with fluid compute.
+Options: (a) the API route waits for the screening and returns it; (b) the route queues a job, with
+Inngest, QStash or Trigger.dev, and the page polls or receives a webhook.
+Decision: (a) in the prototype, (b) in the target.
+Reasons: (a) needs no queue service, no job table and no polling, and a one-shot screening fits the
+function limit. The agent stops searching at 240 s and returns an incomplete result, and the route
+answers 504 at 280 s, so a slow screening never ends in a platform timeout (D-10).
+Consequences: the daily run inherits the limit: it starts screenings in its first 45 s only, 15 to
+20 persons, capped by `MAX_DAILY_SCREENINGS`. Monitoring beyond that, retries and a status per case
+need the queue (`docs/architecture.md`, section 5).
+
+### D-12 — A minimal database, built last in the prototype, complete in the target
+
+Date: 2026-10-01.
+Context: the brief asks for a list of individuals and a daily check. The agent is what is
+evaluated; the database serves the history and the daily delta.
+Options: (a) no database, results in logs only; (b) a minimal schema, added once the agent was
+measured and the app deployed; (c) the target model from the start: watchlist with owners, analyst
+decisions, audit log, retention.
+Decision: (b). Postgres on Neon through Drizzle, three tables, `persons`, `screenings` and
+`findings`, every run stored, a `/history` page, then the daily cron with its delta on URL hashes.
+Reasons: the agent's design came first and storage after. Three tables make the list and the daily
+delta demonstrable. Neon comes from the Vercel Marketplace with its connection strings set, and
+Drizzle keeps the schema typed and the migrations in SQL.
+Consequences: the database is a record, not a dependency: a failed write is logged and the
+screening is returned anyway. The classifications of a finding are text typed in TypeScript, since
+the agent's schema still changed. The target adds a watchlist with owner and frequency, analyst
+decisions, an audit log and a retention period.
+
+### D-13 — Web content is untrusted data
+
+Date: 2026-10-01.
+Context: the model reads search results anyone can write. A page can carry instructions: rate this
+person low, reveal the prompt, add a link.
+Options: (a) rely on the model's own resistance; (b) treat every page as data and bound what the
+answer can do.
+Decision: (b), in three places. The system prompt declares search results untrusted and tells the
+model to ignore any instruction in them; the name reaches the prompt inside tags declared as data.
+The answer is validated against a JSON schema with closed enums. Every finding URL must be one of
+the search results; any other goes to `rejectedUrls`.
+Reasons: a prompt rule alone does not stop an injection. The schema bounds the form of the answer,
+the URL check removes invented or planted links, and since the score is computed in code, the model
+never sets the risk (D-04).
+Consequences: an injection can still bend a judgment within a screening: an identity, a status, an
+omitted finding. The detection measures came with D-31, D-36 and D-37; the six defense layers are
+in `docs/security.md`.
+
+### D-14 — Out of scope on purpose: transliteration, sanctions and PEP lists, accounts, alerts
+
+Date: 2026-10-01.
+Context: two days, and an evaluation of the agent's construction, quality and optimization.
+Options: (a) build each of these partly; (b) leave them out and say so.
+Decision: (b). Transliteration: a name is searched as typed and without diacritics, in no other
+script. Sanctions and PEP lists: a separate screening step with its own data, not adverse media.
+Authentication and roles: one shared password protects the deployed prototype, with no accounts.
+Alerts: new findings show in `/history` and in the daily summary, and nobody is notified.
+Reasons: each needs its own data, provider or accounts, and none changes how the agent searches and
+judges. Built halfway, each would hide its real cost.
+Consequences: all four are next steps or backlog items in `docs/architecture.md`: sanctions and PEP
+lists through an API such as OpenSanctions, analyst accounts with roles, notification on change,
+transliteration.
+
 ### D-15 — Modular monolith now, isolated worker later; the boundary is one JSON contract
 
+Date: 2026-10-01.
 Context: the agent processes untrusted web content and holds the API key. Next.js serves the UI.
 Options: (a) agent code mixed with the app, imports across layers; (b) agent as a server-only
 module with a single exported function; (c) a separate service from day one.
@@ -124,6 +265,7 @@ privilege, execution profile, lifecycle) without rewriting. Next.js submits jobs
 
 ### D-16 — Running the agent from the CLI with `tsx --conditions=react-server`
 
+Date: 2026-10-01.
 Context: `server-only` throws on import unless the module is resolved under the `react-server`
 export condition, so `npx tsx scripts/screen.ts` would crash at start-up.
 Options: (a) run the scripts with `tsx --conditions=react-server`, the condition Next.js applies
@@ -138,6 +280,7 @@ Consequences: the npm scripts `screen` and `evaluate` carry the flag, documented
 
 ### D-17 — Web search called directly in v1, dynamic filtering measured in v2
 
+Date: 2026-10-01.
 Context: from `web_search_20260209` on, dynamic filtering is on by default: Claude runs the
 searches from code execution and filters the results before they enter the context.
 Options: (a) keep the default; (b) `allowed_callers: ["direct"]` on `web_search_20260318`; (c)
@@ -159,6 +302,7 @@ of searches per screening grows, for instance in daily monitoring.
 
 ### D-18 — Hand-written JSON schema with real enums, validated with zod on the client
 
+Date: 2026-10-01.
 Context: the model's output must fit the `Finding` contract. Category, severity and status are
 closed sets that the score reads.
 Options: (a) a zod schema converted by the SDK helper `zodOutputFormat` and sent with
@@ -177,6 +321,7 @@ most 24 optional and 16 nullable parameters, no personal data in the schema itse
 
 ### D-19 — Search in the languages of the national press, not every official language
 
+Date: 2026-10-01.
 Context: `prepare` searches in each country's languages plus English, and every language costs
 searches out of a fixed budget.
 Options: (a) every official language at national level; (b) the languages in which a national
@@ -189,6 +334,7 @@ written next to the table in `country-languages.ts`, so any entry can be challen
 
 ### D-20 — Part of the search budget is left to the model
 
+Date: 2026-10-01.
 Context: `MAX_SEARCHES` caps the web search tool at 8 uses. The prepared queries use part of it,
 and the model needs a few searches of its own to settle an identity doubt or try another form of
 the name.
@@ -205,23 +351,9 @@ A test checks every country of the table against the budget, and `buildQueries` 
 future entry cannot fit even with every native language merged. `MAX_SEARCHES` lives in
 `prepare.ts` because the plan is sized against it; `search.ts` reads it for `max_uses`.
 
-### D-08 — One call searches and returns the structured assessment
-
-Context: the model must run the searches, then return findings that fit a JSON schema. No page of
-the docs says whether `output_config.format` works together with the web search server tool.
-Options: (a) one call with web search and `output_config.format`; (b) two calls: search and a
-text synthesis with citations, then a JSON extraction without tools, possibly on Haiku 4.5.
-Decision: (a) for v1.
-Reasons: a probe on 2026-10-01 showed the API accepts the combination: HTTP 200, JSON that fits a
-schema with real enums, every finding URL among the search results, $0.067 for two searches.
-Search results are read once. (b) sends the synthesis again to a second call, and its saving is
-on output tokens, 14% of the probe's cost.
-Consequences: two-step remains a v2 measurement. In structured mode the text block carries no
-citations, so the source shown to the analyst is each finding's URL. `page_age` is a relative
-"last updated" string, so a finding's date comes from the model's reading of the article.
-
 ### D-21 — No model fallback on refusal; a refusal is reported in `coverage.errors`
 
+Date: 2026-10-01.
 Context: Sonnet 5.5's safety classifiers can decline a request (HTTP 200,
 `stop_reason: "refusal"`). Anthropic recommends a server-side fallback that answers with another
 model.
@@ -237,6 +369,7 @@ the last continuation are handled the same way.
 
 ### D-22 — One finding per matter, with corroborating URLs, at most 8 findings
 
+Date: 2026-10-01.
 Context: on the first real run, 10 of the findings about Madoff described the same conviction and
 the output was 26% of the cost. The score's modulator "same facts reported by at least two
 independent sources" needs to know which articles report the same facts.
@@ -255,6 +388,7 @@ several sources.
 
 ### D-23 — Scoring grid: precedences and gaps settled
 
+Date: 2026-10-01.
 Context: implementing the grid of `PLAN.md` exposed overlaps and gaps: an acquittal in a critical
 category, an old minor matter, a minor conviction, a conviction at medium identity, a rule made
 redundant by another, and the confidence of a result that holds only homonyms.
@@ -273,26 +407,9 @@ category cannot be ruled out.
 Consequences: each rule has a test in `score.test.ts`, and the grid in `PLAN.md` section 4 states
 the same rules as the code.
 
-### D-10 — Search and output limits, retries and time budget
-
-Context: the cost and the duration of a screening must be bounded, and the synchronous API route
-runs under the 300 s limit of Vercel's Hobby plan.
-Options: the SDK defaults (two retries, a 10-minute timeout, no cap on searches), or explicit
-limits.
-Decision: `max_uses` = `MAX_SEARCHES` = 8, two of them left to the model (D-20); `max_tokens` =
-8,000; at most 3 continuations of a paused turn; `maxRetries: 0` on the search call; one budget of
-240 s for the whole turn, each request getting what remains of it. A timeout becomes a `timeout`
-coverage error and the result is incomplete.
-Reasons: a retried request whose answer never arrived would run and bill its searches again. 240 s
-leaves 60 s for scoring and the response. The first Madoff run used 2 searches and 2,522 output
-tokens, well under both caps.
-Consequences: in recall, a person with many matters can exhaust the searches, which shows as
-`max_uses_exceeded`. A transient 429 or 5xx fails the screening at once instead of being retried.
-The usage of a request cut by the timeout is unknown although it may be billed. The values are
-revisited with the v2 measurements.
-
 ### D-24 — The run log is written by the callers, without names, under a keyed pseudonym
 
+Date: 2026-10-01.
 Context: every run appends a line to `logs/runs.jsonl`. The summary, the findings, the queries
 and the URLs all contain the screened person's name. On Vercel, the filesystem is read-only
 outside `/tmp`.
@@ -308,6 +425,7 @@ route will log the same entry to standard output.
 
 ### D-25 — A top-level `status: complete | incomplete` in the result
 
+Date: 2026-10-01.
 Context: an empty low result can mean that nothing exists or that the search failed. A fake low is
 the failure to avoid.
 Options: (a) leave integrators to read `coverage.errors`; (b) a fourth risk value, `undetermined`;
@@ -321,6 +439,7 @@ Consequences: the result is incomplete when a planned query did not run or anyth
 
 ### D-26 — The result says how many articles were reviewed
 
+Date: 2026-10-01.
 Context: the first evaluation returned no finding for the homonym case, and nothing in the result
 told "the searches brought nothing back" from "they brought articles, none of them negative". An
 empty result is not a clean one.
@@ -332,8 +451,27 @@ multiply the size of the result and of the page. The count is free to compute.
 Consequences: the articles themselves stay out of the result. For diagnosis, `evaluate` saves the
 full result of each fixed case in `logs/evaluation/`, and the run log keeps the count.
 
+### D-27 — Public figures as test data; Jean Martin replaced by David Smith
+
+Date: 2026-10-01.
+Context: the fixed cases are replayed after every change, with known expected results, and they
+name real people.
+Options: (a) private individuals found in the press; (b) public figures whose cases were decided in
+public hearings and widely reported, plus a fictional name and a very common name.
+Decision: (b). Bernard Madoff for a known high, a fictional name for a clean result, and a common
+name for namesakes. The homonym case first used Jean Martin, FR, and was replaced by David Smith,
+GB.
+Reasons: screening a private person for a test would process data on offences with no purpose. The
+Jean Martin run returned 36 articles and no namesake with negative coverage, because French judicial
+reporting rarely names ordinary defendants in full: the case no longer tested identity resolution.
+British court reporting names defendants, so namesakes of David Smith with convictions come back and
+must be rated low.
+Consequences: the native cases and the extended set follow the same rule (`docs/security.md`, Test
+data). The homonym case expects at least one namesake at low identity and no counted finding.
+
 ### D-28 — Each finding says who it is about; a finding about an associate never counts
 
+Date: 2026-10-01.
 Context: in the native-only measurement, an article about the screened mayor's partner, with
 "association only" in its evidence, came back at medium identity and was counted. The prompt asked
 for a low rating; the model followed it in one run out of two.
@@ -350,6 +488,7 @@ associate findings, which are not homonyms. Runs from v2.2 final on carry the ne
 
 ### D-29 — Prompt caching on the static prefix
 
+Date: 2026-10-01.
 Context: every screening sends the same system prompt and output schema, and the server-side search
 loop rereads the prefix and the earlier search results at each iteration.
 Options: (a) no caching; (b) top-level automatic caching; (c) an explicit breakpoint on the last
@@ -368,6 +507,7 @@ hit). Effort and thinking settings stay fixed, since changing them invalidates t
 
 ### D-30 — The search runs at medium effort
 
+Date: 2026-10-01.
 Context: Sonnet 5.5 defaults to high effort. Effort steers every output token, tool calls included.
 Options: (a) high, the default; (b) medium; (c) low.
 Decision: (b).
@@ -380,8 +520,26 @@ would settle it, a situation the fixtures do not cover; the completeness check c
 planned query, not a skipped free one. The value is a constant, since changing it invalidates the
 cache.
 
+### D-31 — Four deterministic defenses around the model
+
+Date: 2026-10-01.
+Context: the prompt rule, the schema and the URL check (D-13) bound what an injection can do, but
+nothing detected one, the name fields accepted any character, and any URL scheme or site could be
+cited if the search returned it.
+Options: (a) leave the defenses as they were; (b) add checks in code that cost no call; (c) a
+classifier or a second model on the pages or the answer, at the price of a call.
+Decision: (b), four checks: a canary in the system prompt that marks the result `compromised` if it
+comes back; strict validation of the name fields; http and https as the only accepted URL schemes;
+a block list of sites without editorial control.
+Reasons: none costs a call or a token, and each is tested without network. (c) stays a target, as
+layers 4 and 6 of `docs/security.md`.
+Consequences: D-36 details the four measures and their first measurement. D-37 moves the block
+list from the search tool to code, after the tool filter changed the whole result set, and adds the
+`flooded` error.
+
 ### D-32 — An allegation alone starts at medium; any official step is high
 
+Date: 2026-10-01.
 Context: the grid gave high to any matter in a critical category at high identity, whatever its
 status. The extended validation showed it on an ongoing trial, and the same rule applied to a press
 allegation without any official step.
@@ -399,6 +557,7 @@ the analyst sees which finding drives the result.
 
 ### D-33 — A status for final administrative and regulatory decisions
 
+Date: 2026-10-01.
 Context: in the extended validation, the FCA ban on Jes Staley came back as `unclear` in one run and
 as `conviction` in the other, and an ineligibility pronounced by the Constitutional Council as
 `conviction`. The risk then depended on an arbitrary label.
@@ -414,6 +573,7 @@ define it as well.
 
 ### D-34 — A finding about an organization is capped at medium
 
+Date: 2026-10-01.
 Context: in the v3 validation, a BaFin fine on N26 came back as a finding with `subject:
 organization`, status `sanctioned`, moderate severity, at high identity. The grid rated it high,
 twice over: a final sanction of moderate severity counts like a conviction (D-33), and three
@@ -433,6 +593,7 @@ not apply to it.
 
 ### D-35 — A language tag in front of an executed query does not make the coverage incomplete
 
+Date: 2026-10-01.
 Context: the user message lists each planned query after its language tag, `[pl] "Józef Pinior" ...`.
 In one run out of about forty-five, the model copied the tag into the four queries it ran. Every
 planned query ran, but the exact comparison missed them, and the result came back `incomplete` with
@@ -450,6 +611,7 @@ Replayed on the archived result, the coverage is complete.
 
 ### D-36 — Four defenses around the model: canary, strict input, web URLs only, blocked domains
 
+Date: 2026-10-01.
 Context: the model reads pages anyone can write and returns text that the interface will render.
 The existing guards were the rule that web content is data, the schema-validated output, URLs
 filtered on the search results, and a score computed in code. They did not detect an injection that
@@ -479,6 +641,7 @@ without the list, the result set of the run before it (see `logs/comparison.md`)
 
 ### D-37 — Blocked domains are filtered in code, not on the search tool
 
+Date: 2026-10-01.
 Context: with `blocked_domains` on the search tool (D-36), the search returned a different result
 set, not the same set minus the listed sites. On the homonym case, the full list and a list without
 the forums both returned ten URLs without Wikipedia; without the list, the result set of the run
@@ -506,6 +669,7 @@ run once: 5/5, Wikipedia back with 22 URLs, as many as before the list, no URL r
 
 ### D-38 — Regulatory and civil terms in the merged query
 
+Date: 2026-10-01.
 Context: the query of each language held only criminal vocabulary: the first term of each offence
 category and the proceedings terms. Regulatory and civil matters, which the categories `regulatory`
 and `civil_litigation` are there to report, were found only when an article also used a criminal
@@ -532,6 +696,7 @@ fix a famous name drowned by generic pages.
 
 ### D-39 — The name is repeated in every clause of the query
 
+Date: 2026-10-01.
 Context: the Steve Jobs case still missed the SEC backdating matter after D-38. Three probes of the
 search tool, one query each (`docs/evaluation.md`, "Search engine query semantics"), showed that the
 engine binds a quoted name only to the term that follows it: `"Name" a OR b OR c` reads as
@@ -564,6 +729,7 @@ reported by an encyclopedia only.
 
 ### D-40 — High is kept for critical categories and final decisions
 
+Date: 2026-10-01.
 Context: once D-39 found the Steve Jobs matters, the case came out high on two civil claims: a 2007
 shareholder class action over the option backdating and the no-poach antitrust case, both
 `civil_litigation` at status `allegation`. Two modulators, a reliable source and corroboration,
@@ -587,6 +753,7 @@ nor old: the Jobs case is low only when the model dates its findings, as it did 
 
 ### D-41 — Output schema ordered aliases, findings, summary: tried and rejected
 
+Date: 2026-10-01.
 Context: under constrained decoding, required properties are written in the order of the schema
 (structured outputs documentation). The summary came first, and the Mouly runs showed summaries
 naming matters that had no finding, against the prompt.
@@ -606,47 +773,9 @@ Measured once on 2026-10-01 on the five fixed cases, Jobs and Mouly (`logs/compa
   Decision: rejected. The schema keeps the summary first and prompt `v9` is restored. The instability
   of the Jobs label led to D-43.
 
-### D-43 — An allegation alone stays below high
-
-Context: D-40 kept high for critical categories, where an allegation alone still reached high on
-two modulators (D-32). In the D-41 run, the Steve Jobs shareholder class action came back as `fraud`
-at status `allegation`, undated, and two modulators made the case high; the run before had the same
-matter as `civil_litigation`, and low. The risk turned on a label the model sets differently from
-one run to the next.
-Options: (a) keep D-32; (b) cap a finding at status `allegation` at medium, whatever its category
-and modulators.
-Decision: (b).
-Reasons: an allegation is a claim no authority has taken up; however many outlets repeat it, it is a
-reason to look, not a high risk. Any official step, from investigation to final decision, still
-reaches high in a critical category (D-32), and a final decision in any category (D-40).
-Consequences: the allegation and modulator tests in `score.test.ts` now use a minor final sanction
-to show modulators at work, and a test checks the cap in four categories; `PLAN.md` section 4.
-Replayed without any API call: nothing changes on the D-39 and D-40 archives beyond D-40 itself; on
-the D-41 run, the Jobs class action goes from high to medium. It falls to low only as a moderate
-category with a date over two years old (D-40), as in the D-40 run; labelled `fraud`, it stays at
-medium.
-
-### D-44 — Findings, then summary, then aliases; encyclopedias named as a source
-
-Context: D-41 put `aliases` first and the summary last; the homonym case then ran to the output cap,
-and Mouly's Wikipedia-only matters stayed in the summary. One change per hypothesis this time.
-Decision: the root of the output schema is written findings, summary, aliases: the summary follows
-the findings it should describe, and the aliases come last, described as other names the sources use
-for the screened person only, never for namesakes, at most three, usually empty. The list is cut to
-three in `search.ts`, since the grammar cannot bound an array, and carried into
-`coverage.aliases`: a name the search did not query. `encyclopedia` joins the `sourceReliability`
-values; the prompt asks for it instead of `unknown` for an encyclopedia-only matter, and the grid
-weighs it like `unknown`, not as a reliable source. Prompt `v10` adds "Write the findings first; the
-summary describes the findings listed."
-Consequences: measured on 2026-10-01 on homonym, Mouly and Jobs, one run each
-(`logs/comparison.md`): homonym is low with its two namesakes and no runaway output, no alias; Mouly
-has his alias, `Marco Mouly`, and one Wikipedia-only matter as a finding, but his insolvency
-conviction and another Wikipedia-only matter remain in the summary only; Jobs is medium, the class
-action labelled `fraud` again. Stored screenings from before have no aliases and read as an empty
-list.
-
 ### D-42 — A second search turn under an alias
 
+Date: 2026-10-01.
 Context: the sources name Mardoché Mouly "Marco Mouly"; with the name bound to every clause (D-39),
 pages that give only the alias never match, and his 2024 insolvency conviction was missed in every
 run. The model reports the other names in `aliases` (D-44) but does not search them.
@@ -686,8 +815,50 @@ forms and maiden names. Measured on the full regression under v12, the same day:
 longer lists her maiden name, Staley still lists his longer legal form; four second turns instead
 of five, the same seventeen risks, 7% less in cost.
 
+### D-43 — An allegation alone stays below high
+
+Date: 2026-10-01.
+Context: D-40 kept high for critical categories, where an allegation alone still reached high on
+two modulators (D-32). In the D-41 run, the Steve Jobs shareholder class action came back as `fraud`
+at status `allegation`, undated, and two modulators made the case high; the run before had the same
+matter as `civil_litigation`, and low. The risk turned on a label the model sets differently from
+one run to the next.
+Options: (a) keep D-32; (b) cap a finding at status `allegation` at medium, whatever its category
+and modulators.
+Decision: (b).
+Reasons: an allegation is a claim no authority has taken up; however many outlets repeat it, it is a
+reason to look, not a high risk. Any official step, from investigation to final decision, still
+reaches high in a critical category (D-32), and a final decision in any category (D-40).
+Consequences: the allegation and modulator tests in `score.test.ts` now use a minor final sanction
+to show modulators at work, and a test checks the cap in four categories; `PLAN.md` section 4.
+Replayed without any API call: nothing changes on the D-39 and D-40 archives beyond D-40 itself; on
+the D-41 run, the Jobs class action goes from high to medium. It falls to low only as a moderate
+category with a date over two years old (D-40), as in the D-40 run; labelled `fraud`, it stays at
+medium.
+
+### D-44 — Findings, then summary, then aliases; encyclopedias named as a source
+
+Date: 2026-10-01.
+Context: D-41 put `aliases` first and the summary last; the homonym case then ran to the output cap,
+and Mouly's Wikipedia-only matters stayed in the summary. One change per hypothesis this time.
+Decision: the root of the output schema is written findings, summary, aliases: the summary follows
+the findings it should describe, and the aliases come last, described as other names the sources use
+for the screened person only, never for namesakes, at most three, usually empty. The list is cut to
+three in `search.ts`, since the grammar cannot bound an array, and carried into
+`coverage.aliases`: a name the search did not query. `encyclopedia` joins the `sourceReliability`
+values; the prompt asks for it instead of `unknown` for an encyclopedia-only matter, and the grid
+weighs it like `unknown`, not as a reliable source. Prompt `v10` adds "Write the findings first; the
+summary describes the findings listed."
+Consequences: measured on 2026-10-01 on homonym, Mouly and Jobs, one run each
+(`logs/comparison.md`): homonym is low with its two namesakes and no runaway output, no alias; Mouly
+has his alias, `Marco Mouly`, and one Wikipedia-only matter as a finding, but his insolvency
+conviction and another Wikipedia-only matter remain in the summary only; Jobs is medium, the class
+action labelled `fraud` again. Stored screenings from before have no aliases and read as an empty
+list.
+
 ### D-45 — A warning when the summary cites years no finding is dated in
 
+Date: 2026-10-01.
 Context: summaries kept describing matters that had no finding, against the prompt (D-41, D-44).
 Decision: `summary-check.ts` lists the four-digit years of the summary that no finding is dated in;
 when there are some, `coverage.errors` gets `unsourced_summary`, "the summary mentions years without a dated finding", with those years. It is a warning: it
@@ -699,6 +870,7 @@ and 2008 and 2021 for Madoff, the years of his arrest and death: years of contex
 
 ### D-46 — Reading a page in full when its extract leaves a status or a date open: tried and rejected
 
+Date: 2026-10-02.
 Context: a search result gives the model a title and a short extract. When the extract does not
 say where a matter stands or when, the finding comes back `unclear` or undated, and the grid cannot
 age it: the Jobs class action stayed undated in most runs (D-40).
@@ -731,6 +903,7 @@ changelog (0.130.0) but not on the tool's documentation page.
 
 ### D-47 — A second call, decided by code, to settle dates and statuses: planned, not implemented
 
+Date: 2026-10-02.
 Context: the date and the status of a finding come from a search extract, and they move between
 runs on the same article. The Justice Department release on Madoff was dated 2009-06-29 in one run
 and 2009-03-12 in the next. The article on Mouly's money-laundering investigation, the same URL
@@ -760,6 +933,7 @@ dates corrected on at least two cases, and a mean cost under +25%.
 
 ### D-48 — Search operators `inpage:`, `intitle:`, `after:` and `lang:`: measured, not adopted
 
+Date: 2026-10-02.
 Context: repeating the name in every clause (D-39) spends most of the 380 characters and 48 words a
 query may hold, so a query keeps at most nine clauses. An operator applying the name to the whole
 query would free that room, and a date operator would let the daily re-screening look at recent
@@ -790,3 +964,94 @@ from its extract. One run per probe, $0.26 in all. Probes 1 to 3 are localized t
 Decision: none of these operators is adopted. The form of D-39, with the name repeated in every
 clause, remains the best measured. A time window for the daily re-screening cannot come from the
 search tool, which has no date parameter: it needs direct access to the engine.
+
+### D-49 — A second screening on a stronger model when the first shows a signal: built, off by default
+
+Date: 2026-10-02.
+Context: Opus 5.5 searched an alias itself and dated matters more precisely than Sonnet, at twice
+the cost of every screening (D-09). Most persons screened have nothing adverse, and the Sonnet
+result is enough for them.
+Decision: `index.ts` screens with Sonnet first. When that screening holds a counted finding, an
+alias the queries did not cover (the one D-42 would search), an `unsourced_summary` warning or an
+incomplete status, it screens the person again from the start on the model `ESCALATION_MODEL`
+names, such as `claude-opus-5-5`; unset, nothing escalates. The second screening runs inside the
+remaining time budget, and only with 120 s of it left. It replaces the first; tokens, cost and calls add up, each
+screening priced at its own model, and `coverage.escalatedTo` names the model. A compromised answer
+(D-36), a refusal (D-21) or a timeout never escalates. With escalation on, the Sonnet screening
+skips its alias turn: an alias escalates anyway, and the Opus screening runs its own.
+Alternatives: (a) Opus for every screening, $0.168 on average over seven cases (D-09), paid for clean
+persons too. (b) Sonnet only, with D-42: the cheapest, without the dates and aliases Opus brings.
+(c) Escalation on a counted finding only: fewer escalations, but an alias or a doubtful summary on a
+person with nothing counted would stay with Sonnet.
+Reasons: the stronger model is paid where an analyst will read findings, and the signals are
+deterministic, so code decides.
+Measured on 2026-10-02 (`logs/comparison.md`), prompt v13, against the same prompt on Sonnet with
+escalation off, on the seventeen cases:
+
+- 14 of 17 cases escalated, and no risk changed. Counted findings went from 25 to 42, most added at
+  low or medium level: controversies, acquittals, allegations. clean-public-figure gained a blog
+  allegation, counted at low, against an expectation of none.
+- Dates: Held's conviction dated to its finality, April 2023, and Mouly's matters to the day; but
+  Staley's 2018 fine came back as an undated investigation, and one of Pinior's convictions undated.
+- Cost: $1.4683 to $3.7756. A screening without signal cost $0.0639 on average, an escalated one
+  $0.2560, the discarded Sonnet screening included. With 80% of screenings without signal, $0.1023
+  per screening; the $0.12 bound holds up to 29% of screenings escalated.
+- Durations up to 53 s.
+
+Criterion set beforehand, no risk regression and a weighted mean under $0.12: met. clean-public-figure
+escalated on a signal its discarded Sonnet screening showed, which the base run did not; the
+signals were not kept then.
+Outcome: the code stays, off by default. The fixtures are adverse by design, so their 14 escalations
+out of 17 say nothing of the share in use, and the $0.12 bound needs it under 29%; Opus also adds
+low-level findings the analyst has to read; and that share has not been measured. Every screening
+now records the signals it showed in `coverage.escalationSignals`, escalated or not, and the run
+log carries them with `escalatedTo`: the share can be read from screenings run with escalation off
+before `ESCALATION_MODEL` is set.
+
+### D-50 — A finding sourced from a blog or a social network is shown, never counted
+
+Date: 2026-10-02.
+Context: under escalation (D-49), clean-public-figure, a Nobel laureate, came back with a
+harassment allegation relayed by a science-integrity blog, counted at low; the Jobs case had a
+Grunge article counted at medium. Neither page has editorial control.
+Decision: `score.ts` never counts a finding whose `sourceReliability` is `blog` or `social`, as it
+never counts a finding about an associate (D-28) or at low identity. The finding stays on the page,
+under "Shown, not counted", labelled "Blog or social source".
+Alternatives: (a) count it with a cap at low or medium: the level then rests on a page anyone can
+write. (b) Block blog domains in code, as social networks are (D-37): no closed list of blogs
+exists, and the analyst would lose the lead. (c) Leave the grid as it is: low-reliability pages
+keep adding counted findings, as the escalated runs showed.
+Reasons: the label comes from the model, which names the source type of the page it cites as
+`url`, the most authoritative it found (prompt rule): when that is a blog, no press or official
+source carried the matter. A blog finding in a critical category still keeps the confidence at
+medium when nothing is counted, as an uncounted homonym does: the analyst should read it.
+Consequences: replayed without API call on the v13 Sonnet and D-49 archives
+(`logs/rescore-d50.mts`): no risk and no confidence changed, clean-public-figure passes again (one
+counted finding to none), and the Jobs case counts two findings instead of three, still medium. A
+matter reported only by a blog no longer weighs on the risk, even when it is true.
+
+### D-51 — The model's own level is recorded beside the grid, as an opinion
+
+Date: 2026-10-02.
+Context: the grid in code sets the risk (D-04). Whether the model, reading the same articles, would
+reach the same level was never recorded, so a gap between the two could not be seen.
+Options: (a) keep the model silent on the overall risk, the rule of prompts up to `v13`; (b) ask for
+the model's level and record it beside the computed one, without scoring it; (c) let the model set
+the risk, which D-04 rules out; (d) blend both levels.
+Decision: (b). The answer schema gains `suggestedRisk`, written after the findings and before the
+summary. The result exposes `modelSuggestedRisk` and `riskDisagreement`, true when the model gave a
+level that differs from the computed one; the page shows the model's level under the badges and
+flags a difference. Both fields are stored in `coverage_json`, without a migration, and read as
+`null` and `false` on older rows. A compromised answer gives no opinion (D-36); after an alias turn
+the higher of the two views stands; an escalated screening keeps the opinion of its second model.
+Prompt `v14` replaces the rule against assessing the overall risk.
+Reasons: a disagreement points the analyst to a case worth a second look and shows where the grid
+and the model read the same facts differently, at the cost of a few output tokens.
+Consequences: measured on 2026-10-02 on the seventeen cases, once each: 17/17 pass, $1.4140 in all,
+a mean of $0.0832 per screening, against $1.4683 under `v13`. The model differs from the grid on 2
+of 17 cases, 11.8%, both times lower. Staley: the grid gives high for a final regulatory sanction,
+the FCA's lifetime ban upheld in 2025; the model says medium. Jobs: the grid gives medium for two
+undated civil class actions, which cannot age to low without a date (D-40); the model says low.
+Both fall where the grid is deliberately conservative. The model was more lenient than the policy
+in both, a final FCA ban at medium and undated civil actions at low, and never stricter; the cost is
+unchanged.

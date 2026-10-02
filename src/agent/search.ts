@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 
-import { PRICES, isPricedModel, type PricedModel } from "./cost";
+import type { Effort } from "./config";
+import type { PricedModel } from "./cost";
 import { BLOCKED_DOMAINS } from "./data/blocked-domains";
 import { MAX_SEARCHES } from "./prepare";
 import { PROMPT_CANARY, SYSTEM_PROMPT, buildUserMessage } from "./prompts";
@@ -21,13 +22,8 @@ import type {
   TokenUsage,
 } from "./types";
 
-// Sonnet 5.5 screens (D-09). MODEL replays the fixtures on another model whose prices cost.ts holds.
-export const DEFAULT_MODEL: PricedModel = "claude-sonnet-5-5";
 const MAX_OUTPUT_TOKENS = 8_000;
 const MAX_CONTINUATIONS = 3;
-// Sonnet 5.5 defaults to high; medium is kept (D-30). High exists to replay the v1 configuration in
-// measurements (EFFORT). Changing it invalidates the prompt cache.
-export type Effort = "high" | "medium";
 // Retrying a request whose answer never arrived would run and bill the searches a second time.
 const SEARCH_MAX_RETRIES = 0;
 const WEB_PROTOCOLS: ReadonlySet<string> = new Set(["http:", "https:"]);
@@ -54,15 +50,15 @@ export async function searchAdverseMedia(
   input: ScreeningInput,
   plan: SearchPlan,
   timeBudgetMs: number,
-  effort: Effort = "medium",
-  model: PricedModel = DEFAULT_MODEL,
+  effort: Effort,
+  model: PricedModel,
 ): Promise<SearchOutcome> {
   const request = {
     model,
     max_tokens: MAX_OUTPUT_TOKENS,
     // The cache breakpoint closes the static prefix, tools then system; the user message after it
     // changes on every screening. The tool definition carries user_location, so the prefix is only
-    // shared between screenings of one country (v2.3).
+    // shared between screenings of one country (D-29).
     system: [{ type: "text", text: SYSTEM_PROMPT, cache_control: { type: "ephemeral" } }],
     tools: [webSearchTool(input.country, plan.countrySupported)],
     output_config: {
@@ -100,18 +96,6 @@ export async function searchAdverseMedia(
   }
 }
 
-export function parseEffort(value: string | undefined): Effort {
-  if (value === undefined || value === "" || value === "medium") return "medium";
-  if (value === "high") return "high";
-  throw new Error(`EFFORT must be high or medium, got "${value}"`);
-}
-
-export function parseModel(value: string | undefined): PricedModel {
-  if (value === undefined || value === "") return DEFAULT_MODEL;
-  if (isPricedModel(value)) return value;
-  throw new Error(`MODEL must be one of ${Object.keys(PRICES).join(", ")}, got "${value}"`);
-}
-
 // A request cut by the timeout has no usage to report, although the API may still have run and
 // billed it; the usage and apiCalls of the outcome cover the answered requests only.
 function timedOut(
@@ -126,6 +110,7 @@ function timedOut(
   if (responses.length === 0) {
     return {
       summary: null,
+      suggestedRisk: null,
       findings: [],
       rejectedUrls: [],
       articles: [],
@@ -154,15 +139,17 @@ export function interpretTurn(responses: readonly Anthropic.Message[]): SearchOu
   const sourced = parsed.ok
     ? attachSources(parsed.assessment.findings, search.articles)
     : { findings: [], rejectedUrls: [] };
+  const flood = floodCheck(search.articles);
   const errors = [
     ...search.errors,
     ...(parsed.ok ? [] : [parsed.error]),
     ...(leaksCanary(content) ? [COMPROMISED] : []),
-    ...(isFlooded(search.articles) ? [floodedError(search.articles)] : []),
+    ...(flood === null ? [] : [flood]),
   ];
 
   return {
     summary: parsed.ok ? parsed.assessment.summary : null,
+    suggestedRisk: parsed.ok ? parsed.assessment.suggestedRisk : null,
     findings: sourced.findings,
     rejectedUrls: sourced.rejectedUrls,
     articles: search.articles,
@@ -176,10 +163,9 @@ export function interpretTurn(responses: readonly Anthropic.Message[]): SearchOu
   };
 }
 
-// Every search shows up as a server_tool_use and web_search_tool_result pair in the content,
-// whether the model called it directly or from the code that filters results (D-17). The caller
-// field tells the two apart and is not needed here. The output of that code is not a source:
-// finding URLs are checked against search results only.
+// Every search is a server_tool_use / web_search_tool_result pair. The tool is called directly
+// (D-17); with dynamic filtering turned back on, the searches its code runs would come back as the
+// same pairs, read here too. Only search results are sources, never the output of that code.
 export function collectSearch(content: readonly Anthropic.ContentBlock[]): {
   articles: RawArticle[];
   queries: string[];
@@ -199,11 +185,7 @@ export function collectSearch(content: readonly Anthropic.ContentBlock[]): {
     if (Array.isArray(block.content)) {
       for (const result of block.content) {
         if (!articles.has(result.url)) {
-          articles.set(result.url, {
-            url: result.url,
-            title: result.title,
-            pageAge: result.page_age,
-          });
+          articles.set(result.url, { url: result.url, title: result.title });
         }
       }
     } else {
@@ -297,13 +279,9 @@ export function isBlockedDomain(url: string): boolean {
 
 // The blocked domains are filtered here rather than on the search tool, whose filter changes the
 // whole result set (D-37). If such pages crowd out the rest, the search covered little else.
-export function isFlooded(articles: readonly RawArticle[]): boolean {
+export function floodCheck(articles: readonly RawArticle[]): CoverageError | null {
   const blocked = articles.filter((article) => isBlockedDomain(article.url)).length;
-  return blocked > articles.length * MAX_BLOCKED_SHARE;
-}
-
-function floodedError(articles: readonly RawArticle[]): CoverageError {
-  const blocked = articles.filter((article) => isBlockedDomain(article.url)).length;
+  if (blocked <= articles.length * MAX_BLOCKED_SHARE) return null;
   return {
     code: "flooded",
     detail: `${blocked} of ${articles.length} search results are on blocked domains`,

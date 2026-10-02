@@ -1,7 +1,7 @@
 # Evaluation
 
 How the agent was measured, what each fixed case tests, and what every optimization changed. All
-figures come from runs on 2026-10-01.
+figures come from runs on 2026-10-01 and 2026-10-02.
 
 ## Method
 
@@ -80,6 +80,28 @@ counted findings in any language.
   single turn.
 - **Warnings.** Eight of seventeen summaries cite a year no finding is dated in, mostly years of
   context such as an arrest or a death; the warning stays (D-45).
+
+## Measured on 2026-10-02
+
+Prompt `v13`, Sonnet 5.5, one query per language, escalation off: the seventeen cases pass, for
+$1.4683, a mean of $0.0864 per screening. After the quality pass on the agent code, the five fixed
+cases came back with the same risks and counted findings, for $0.3623.
+
+| dial                           | measured                                   | against                  | result                                                                                                                                                                                                                     | kept                |
+| ------------------------------ | ------------------------------------------ | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------- |
+| depth, `QUERIES_PER_LANGUAGE`  | 2, prompt `v12`, 17 cases                  | 1, prompt `v12`          | matters found 24 to 26, a money-laundering lead whose article names no one and a 1975 arrest over a speeding ticket; Jobs medium to high on a mislabelled finding, 16/17; searches 38 to 73; $1.5117 to $2.6097 (+73%)     | 1                   |
+| model, `MODEL`                 | `claude-opus-5-5`, prompt `v13`, 7 cases   | Sonnet 5.5, prompt `v12` | same risks, 10 counted findings each; Opus searched an alias itself and dated matters more precisely; $0.5741 to $1.1767 (+105%), $0.082 to $0.168 per screening; up to 34 s (D-09)                                        | Sonnet 5.5          |
+| escalation, `ESCALATION_MODEL` | `claude-opus-5-5` after a signal, 17 cases | Sonnet 5.5, prompt `v13` | 14 of 17 escalated, no risk changed, counted findings 25 to 42, most added at low or medium; $1.4683 to $3.7756; $0.1023 per screening if 80% show no signal, under $0.12 up to 29% escalated (D-49)                       | off                 |
+| page reads, web fetch          | at most 3 pages, prompt `v13`, 9 cases     | prompt `v12`             | one page read in nine cases, a PDF the prompt excluded; no status or date corrected; +4.2% (D-46)                                                                                                                          | rejected            |
+| search operators               | `inpage:`, `intitle:`, `after:`, `lang:`   | the D-39 query form      | `inpage:` and `intitle:` bind the name to the first clause only, 5 of 9 results about the person against 9 of 9; `after:` lets a 2022 page through and loses the 2025 press; `lang:` undetermined without a control (D-48) | the D-39 query form |
+
+Replayed without an API call on the archives of the `v13` and escalation runs, the rule that never
+counts a finding sourced from a blog or a social network changed no risk and no confidence (D-50).
+
+Under prompt `v14`, the model's own level is recorded beside the computed one (D-51): it differs on
+2 of 17 cases, both times lower, on Staley's final regulatory ban and on Jobs's undated civil
+actions; the seventeen cases pass, for $1.4140, a mean of $0.0832 per screening.
+The model was more lenient than the policy in both disagreements, never stricter, and the cost is unchanged.
 
 ## Results by version
 
@@ -239,9 +261,9 @@ Native-only case, the article on the investigation of Valérie Bozzi's partner:
 - **`allowed_domains`.** An allow list would put recall at risk on regional outlets, which carried
   the coverage of the native cases. A block list was tried on the search tool and moved to code: the
   tool filter changed the whole result set (D-37).
-- **Time window for daily monitoring.** The web search tool parameters checked have no date filter.
-  A 24–48 hour window would rely on the prompt and on filtering finding dates in code, together
-  with the delta on URL hashes.
+- **Time window for daily monitoring.** The web search tool has no date parameter, and the
+  `after:` operator in the query does not filter by publication date (D-48). A window needs direct
+  access to the engine; the daily run keeps the delta on URL hashes.
 - **Batch API for daily monitoring.** It halves the price of tokens, not of searches. Tokens are
   73% of the v2.4 cost, so the saving would be about 36% per screening at equal cache behaviour, but
   cache hits in a batch are best effort.

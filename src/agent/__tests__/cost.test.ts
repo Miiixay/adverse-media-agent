@@ -31,6 +31,8 @@ function result(): ScreeningResult {
     status: "complete",
     risk: "high",
     confidence: "high",
+    modelSuggestedRisk: "high",
+    riskDisagreement: false,
     summary: "Bernard Madoff pleaded guilty to a Ponzi scheme in 2009.",
     findings: [
       {
@@ -62,6 +64,8 @@ function result(): ScreeningResult {
       urlsReviewed: ["https://www.justice.gov/usao-sdny/pr/bernard-madoff-sentenced"],
       rejectedUrls: [],
       errors: [],
+      escalatedTo: null,
+      escalationSignals: ["counted_finding"],
     },
     usage: { ...MADOFF_RUN_USAGE, estimatedCostUsd: 0.097316, apiCalls: 1 },
     model: "claude-sonnet-5-5",
@@ -121,9 +125,13 @@ describe("runLogEntry", () => {
     expect(entry).toMatchObject({
       subject: pseudonym(MADOFF, KEY),
       risk: "high",
+      modelSuggestedRisk: "high",
+      riskDisagreement: false,
       findings: 1,
       countedFindings: 1,
       errors: [],
+      escalatedTo: null,
+      escalationSignals: ["counted_finding"],
     });
     expect(JSON.stringify(entry).toLowerCase()).not.toContain("madoff");
     expect(JSON.stringify(entry).toLowerCase()).not.toContain("bernard");

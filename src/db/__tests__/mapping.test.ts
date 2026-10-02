@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { ScreeningResult } from "../../agent/types";
+import type { StoredCoverage } from "../schema";
 import {
   countNewFindings,
   findingsToStore,
@@ -19,6 +20,8 @@ const RESULT: ScreeningResult = {
   status: "complete",
   risk: "high",
   confidence: "high",
+  modelSuggestedRisk: "medium",
+  riskDisagreement: true,
   summary: "Convicted for a Ponzi scheme.",
   findings: [
     {
@@ -67,6 +70,8 @@ const RESULT: ScreeningResult = {
     urlsReviewed: [DOJ, NAMESAKE],
     rejectedUrls: [],
     errors: [],
+    escalatedTo: "claude-opus-5-5",
+    escalationSignals: ["counted_finding"],
   },
   usage: {
     inputTokens: 255,
@@ -109,6 +114,21 @@ describe("screeningRows and resultFromRows", () => {
     const { screening, findings } = stored(RESULT);
 
     expect(resultFromRows(screening, findings)).toEqual(RESULT);
+  });
+
+  it("keep the model's opinion in the coverage JSON, and read an older row as having none", () => {
+    const { screening, findings } = stored(RESULT);
+    const before: StoredCoverage = { ...RESULT.coverage };
+
+    expect(screening.coverageJson).toMatchObject({
+      modelSuggestedRisk: "medium",
+      riskDisagreement: true,
+    });
+    expect(resultFromRows({ ...screening, coverageJson: before }, findings)).toMatchObject({
+      modelSuggestedRisk: null,
+      riskDisagreement: false,
+      coverage: RESULT.coverage,
+    });
   });
 
   it("put counted findings first, the most serious first, whatever the order read", () => {

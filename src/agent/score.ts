@@ -34,6 +34,8 @@ const UNDECIDED: ReadonlySet<Status> = new Set(["allegation", "unclear"]);
 // A final decision against the person, by a court or by an administrative or regulatory body.
 const FINAL_DECISIONS: ReadonlySet<Status> = new Set(["conviction", "sanctioned"]);
 const RELIABLE_SOURCES: ReadonlySet<SourceReliability> = new Set(["official", "national_press"]);
+// Pages anyone can publish, without editorial control: they inform the analyst, never the risk (D-50).
+const UNCOUNTED_SOURCES: ReadonlySet<SourceReliability> = new Set(["blog", "social"]);
 // Going over the search budget means the model wanted more searches, not that a planned one failed.
 const NON_BLOCKING_ERRORS: ReadonlySet<CoverageErrorCode> = new Set([
   "max_uses_exceeded",
@@ -50,6 +52,8 @@ const GENERIC_SECOND_LEVELS: ReadonlySet<string> = new Set([
   "org",
 ]);
 const PARTIAL_DATE = /^(\d{4})(?:-(\d{2})(?:-(\d{2}))?)?$/;
+// "[pl] ...": the language tag of the user message, sometimes copied into the query run (D-35).
+const LEADING_LANGUAGE_TAG = /^\[[a-z]{2}\]\s+/;
 
 const RANK: Record<RiskLevel, number> = { low: 0, medium: 1, high: 2 };
 
@@ -129,6 +133,17 @@ export function findingLevel(finding: AssessedFinding, screenedAt: Date): RiskLe
   return personal ? capped : lower(capped, "medium");
 }
 
+// The model's own view against the computed risk: shown to the analyst, never scored (D-51).
+export function disagrees(computed: RiskLevel, suggested: RiskLevel | null): boolean {
+  return suggested !== null && suggested !== computed;
+}
+
+export function higherRisk(a: RiskLevel | null, b: RiskLevel | null): RiskLevel | null {
+  if (a === null) return b;
+  if (b === null) return a;
+  return higher(a, b);
+}
+
 export function isCorroborated(
   finding: Pick<AssessedFinding, "url" | "corroboratingUrls">,
 ): boolean {
@@ -137,11 +152,7 @@ export function isCorroborated(
 }
 
 // Complete when every planned query ran and nothing failed: only then does an empty result mean
-// that nothing was found.
-// The user message lists each planned query after its language tag, "[pl] ...". The model
-// sometimes copies the tag into the query it runs; the search is the same (D-35).
-const LEADING_LANGUAGE_TAG = /^\[[a-z]{2}\]\s+/;
-
+// that nothing was found. A query run with its language tag in front is the same search (D-35).
 export function isCoverageComplete(
   plannedQueries: readonly string[],
   executedQueries: readonly string[],
@@ -154,10 +165,15 @@ export function isCoverageComplete(
   );
 }
 
-// Shown, never counted: a finding at low identity confidence, probably about a homonym, and a
-// finding about an associate, in which the person is not personally involved (D-28).
+// Shown, never counted: a finding at low identity confidence, probably about a homonym; a finding
+// about an associate, in which the person is not personally involved (D-28); a finding whose most
+// authoritative source is a blog or a social network (D-50).
 function isCounted(finding: AssessedFinding): boolean {
-  return finding.identityConfidence !== "low" && finding.subject !== "associate";
+  return (
+    finding.identityConfidence !== "low" &&
+    finding.subject !== "associate" &&
+    !UNCOUNTED_SOURCES.has(finding.sourceReliability)
+  );
 }
 
 // The least certain identity among the counted findings. Without any, an empty result is only

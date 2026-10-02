@@ -27,6 +27,7 @@ function finding(url: string, overrides: Partial<AssessedFinding> = {}): Assesse
 function outcome(overrides: Partial<SearchOutcome>): SearchOutcome {
   return {
     summary: "Convicted for the carbon tax fraud.",
+    suggestedRisk: "high",
     findings: [],
     rejectedUrls: [],
     articles: [],
@@ -162,7 +163,7 @@ describe("mergeFindings", () => {
 describe("mergeOutcomes", () => {
   const primary = outcome({
     findings: [finding("https://lejdd.fr/carbone", { date: "2017-06-28" })],
-    articles: [{ url: "https://lejdd.fr/carbone", title: "Carbone", pageAge: null }],
+    articles: [{ url: "https://lejdd.fr/carbone", title: "Carbone" }],
     executedQueries: ['"Mardoché Mouly" fraude'],
     aliases: ["Marco Mouly"],
   });
@@ -173,8 +174,8 @@ describe("mergeOutcomes", () => {
       finding("https://francebleu.fr/insolvabilite"),
     ],
     articles: [
-      { url: "https://lejdd.fr/carbone", title: "Carbone", pageAge: null },
-      { url: "https://francebleu.fr/insolvabilite", title: "Insolvabilité", pageAge: null },
+      { url: "https://lejdd.fr/carbone", title: "Carbone" },
+      { url: "https://francebleu.fr/insolvabilite", title: "Insolvabilité" },
     ],
     executedQueries: ['"Marco Mouly" fraude'],
     errors: [{ code: "max_uses_exceeded", detail: "search failed" }],
@@ -205,6 +206,16 @@ describe("mergeOutcomes", () => {
     });
     expect(merged.apiCalls).toBe(2);
     expect(merged.aliases).toEqual(["Marco Mouly"]);
+  });
+
+  it("keeps the higher of the two views of the risk, or the only one", () => {
+    const medium = outcome({ suggestedRisk: "medium" });
+
+    expect(mergeOutcomes(medium, underAlias, "Marco Mouly").suggestedRisk).toBe("high");
+    expect(mergeOutcomes(primary, medium, "Marco Mouly").suggestedRisk).toBe("high");
+    expect(
+      mergeOutcomes(medium, outcome({ suggestedRisk: null }), "Marco Mouly").suggestedRisk,
+    ).toBe("medium");
   });
 
   it("keeps both summaries, the second under the alias", () => {

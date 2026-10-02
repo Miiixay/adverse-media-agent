@@ -24,6 +24,11 @@ import type {
   Subject,
 } from "../agent/types";
 
+// The coverage, plus the model's opinion of the risk (D-51), stored here rather than in new
+// columns; rows stored before D-51 lack both fields.
+export type StoredCoverage = ScreeningResult["coverage"] &
+  Partial<Pick<ScreeningResult, "modelSuggestedRisk" | "riskDisagreement">>;
+
 // The levels of the result are stable and get Postgres enums. The classifications of a finding
 // follow the agent's schema, which still changes (a status was added on 2026-10-01): they are text,
 // typed in TypeScript.
@@ -61,7 +66,7 @@ export const screenings = pgTable(
     model: text("model").notNull(),
     promptVersion: text("prompt_version").notNull(),
     // Languages, queries, URLs read and rejected, errors: what the analyst needs to judge coverage.
-    coverageJson: jsonb("coverage_json").$type<ScreeningResult["coverage"]>().notNull(),
+    coverageJson: jsonb("coverage_json").$type<StoredCoverage>().notNull(),
     usageJson: jsonb("usage_json").$type<ScreeningResult["usage"]>().notNull(),
     costUsd: numeric("cost_usd", { precision: 10, scale: 6, mode: "number" }).notNull(),
     durationMs: integer("duration_ms").notNull(),
@@ -101,7 +106,8 @@ export const findings = pgTable(
     identityConfidence: text("identity_confidence").$type<Confidence>().notNull(),
     identityEvidence: jsonb("identity_evidence").$type<string[]>().notNull(),
     sourceReliability: text("source_reliability").$type<SourceReliability>().notNull(),
-    // Null when the finding is not counted in the risk: a probable namesake or an associate.
+    // Null when the finding is not counted in the risk: a probable namesake, an associate, or a
+    // finding sourced from a blog or a social network (D-50).
     riskLevel: riskLevel("risk_level"),
     summary: text("summary").notNull(),
     corroboratingUrls: jsonb("corroborating_urls").$type<string[]>().notNull(),

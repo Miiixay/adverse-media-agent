@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { parseQueriesPerLanguage } from "../config";
 import { COUNTRY_LANGUAGES } from "../data/country-languages";
 import { NEGATIVE_KEYWORDS } from "../data/negative-keywords";
 import {
@@ -10,7 +11,6 @@ import {
   buildQueries,
   languagesFor,
   nameVariants,
-  parseQueriesPerLanguage,
   withinQueryLimits,
   prepare,
 } from "../prepare";

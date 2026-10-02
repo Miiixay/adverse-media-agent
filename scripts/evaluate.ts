@@ -79,6 +79,8 @@ const COLUMNS = [
   "expected",
   "risk",
   "pass",
+  "model",
+  "disagree",
   "status",
   "confidence",
   "counted / findings",
@@ -219,6 +221,8 @@ function table(runs: readonly CaseRun[]): string {
       expected,
       result.risk,
       passed(run) ? "yes" : "no",
+      result.modelSuggestedRisk ?? "none",
+      result.riskDisagreement ? "yes" : "no",
       result.status,
       result.confidence,
       `${countedFindings(result)} / ${result.findings.length}`,
@@ -244,9 +248,11 @@ function totals(runs: readonly CaseRun[]): string {
   const total = costs.reduce((sum, cost) => sum + cost, 0);
   const mean = costs.length > 0 ? total / costs.length : 0;
   const passedCount = runs.filter(passed).length;
+  const disagreements = runs.filter((run) => "result" in run && run.result.riskDisagreement).length;
   return (
     `\n${passedCount}/${runs.length} cases pass. ` +
-    `Total cost $${total.toFixed(4)}, mean $${mean.toFixed(4)} per answered case.`
+    `Total cost $${total.toFixed(4)}, mean $${mean.toFixed(4)} per answered case. ` +
+    `The model's own level differs from the computed one on ${disagreements} of ${costs.length} answered cases.`
   );
 }
 

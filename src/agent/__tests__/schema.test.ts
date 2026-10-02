@@ -99,12 +99,14 @@ describe("screeningInputSchema", () => {
 
 describe("ASSESSMENT_JSON_SCHEMA", () => {
   // Constrained decoding writes required properties in schema order (D-44).
-  it("asks for the findings, then the summary, then the aliases", () => {
+  it("asks for the findings, then the model's view of the risk, the summary and the aliases", () => {
     expect(Object.keys(ASSESSMENT_JSON_SCHEMA.properties)).toEqual([
       "findings",
+      "suggestedRisk",
       "summary",
       "aliases",
     ]);
+    expect(ASSESSMENT_JSON_SCHEMA.properties.suggestedRisk.enum).toEqual(["low", "medium", "high"]);
     expect(ASSESSMENT_JSON_SCHEMA.required).toEqual(Object.keys(ASSESSMENT_JSON_SCHEMA.properties));
   });
 });
@@ -126,12 +128,19 @@ describe("AssessmentSchema", () => {
   };
 
   it("accepts an encyclopedia as a source and requires the aliases, even empty", () => {
-    expect(
-      AssessmentSchema.safeParse({ findings: [finding], summary: "One matter." }).success,
-    ).toBe(false);
-    expect(
-      AssessmentSchema.safeParse({ findings: [finding], summary: "One matter.", aliases: [] })
-        .success,
-    ).toBe(true);
+    const answer = { findings: [finding], suggestedRisk: "high", summary: "One matter." };
+
+    expect(AssessmentSchema.safeParse(answer).success).toBe(false);
+    expect(AssessmentSchema.safeParse({ ...answer, aliases: [] }).success).toBe(true);
+  });
+
+  it("requires the model's view of the risk, in any casing, among the three levels", () => {
+    const answer = { findings: [finding], summary: "One matter.", aliases: [] };
+
+    expect(AssessmentSchema.safeParse(answer).success).toBe(false);
+    expect(AssessmentSchema.parse({ ...answer, suggestedRisk: "Medium" }).suggestedRisk).toBe(
+      "medium",
+    );
+    expect(AssessmentSchema.safeParse({ ...answer, suggestedRisk: "severe" }).success).toBe(false);
   });
 });

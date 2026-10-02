@@ -5,6 +5,7 @@ import { dirname } from "node:path";
 import type {
   Confidence,
   CoverageErrorCode,
+  EscalationSignal,
   RiskLevel,
   ScreeningInput,
   ScreeningResult,
@@ -13,7 +14,7 @@ import type {
 } from "./types";
 
 // USD per million tokens, from https://platform.claude.com/docs/en/about-claude/pricing, read on
-// 2026-09-30. Opus 5.5 is priced for the model comparison (D-09).
+// 2026-09-30. Opus 5.5 is priced for the model comparison (D-09) and the escalation (D-49).
 export const PRICES = {
   "claude-sonnet-5-5": { input: 2, cacheWrite5m: 2.5, cacheWrite1h: 4, cacheRead: 0.2, output: 10 },
   "claude-opus-5-5": { input: 4, cacheWrite5m: 5, cacheWrite1h: 8, cacheRead: 0.2, output: 20 },
@@ -44,11 +45,15 @@ export type RunLogEntry = {
   status: ScreeningStatus;
   risk: RiskLevel;
   confidence: Confidence;
+  modelSuggestedRisk: RiskLevel | null;
+  riskDisagreement: boolean;
   articlesReviewed: number;
   findings: number;
   countedFindings: number;
   errors: CoverageErrorCode[];
   usage: ScreeningResult["usage"];
+  escalatedTo: string | null;
+  escalationSignals: EscalationSignal[];
   durationMs: number;
 };
 
@@ -61,8 +66,26 @@ export function estimateCostUsd(usage: TokenUsage, model: PricedModel): number {
       usage.cacheReadTokens * price.cacheRead +
       usage.outputTokens * price.output) /
     TOKENS_PER_MILLION;
-  const cost = tokenCost + usage.webSearches * WEB_SEARCH_PRICE_USD;
-  return Math.round(cost * MICRODOLLARS_PER_DOLLAR) / MICRODOLLARS_PER_DOLLAR;
+  return toMicrodollars(tokenCost + usage.webSearches * WEB_SEARCH_PRICE_USD);
+}
+
+export function addCostsUsd(a: number, b: number): number {
+  return toMicrodollars(a + b);
+}
+
+export function addUsage(a: TokenUsage, b: TokenUsage): TokenUsage {
+  return {
+    inputTokens: a.inputTokens + b.inputTokens,
+    outputTokens: a.outputTokens + b.outputTokens,
+    cacheReadTokens: a.cacheReadTokens + b.cacheReadTokens,
+    cacheWrite5mTokens: a.cacheWrite5mTokens + b.cacheWrite5mTokens,
+    cacheWrite1hTokens: a.cacheWrite1hTokens + b.cacheWrite1hTokens,
+    webSearches: a.webSearches + b.webSearches,
+  };
+}
+
+function toMicrodollars(usd: number): number {
+  return Math.round(usd * MICRODOLLARS_PER_DOLLAR) / MICRODOLLARS_PER_DOLLAR;
 }
 
 // Only counts, codes and figures: the summary, findings, queries and URLs all contain the name.
@@ -80,11 +103,15 @@ export function runLogEntry(
     status: result.status,
     risk: result.risk,
     confidence: result.confidence,
+    modelSuggestedRisk: result.modelSuggestedRisk,
+    riskDisagreement: result.riskDisagreement,
     articlesReviewed: result.coverage.articlesReviewed,
     findings: result.findings.length,
     countedFindings: result.findings.filter((finding) => finding.countedInScore).length,
     errors: result.coverage.errors.map((error) => error.code),
     usage: result.usage,
+    escalatedTo: result.coverage.escalatedTo,
+    escalationSignals: result.coverage.escalationSignals,
     durationMs: result.durationMs,
   };
 }

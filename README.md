@@ -1,127 +1,121 @@
 # Adverse Media Agent
 
-Adverse-media screening for individuals. Given a first name, a last name and a country, the
-agent searches the web in the country's native language and in English, judges whether each
-article is about the same person, qualifies the negative coverage, and returns a
-`low | medium | high` risk with the URLs of the sources.
+Screens an individual for adverse media in open sources, for compliance analysts: from a first name,
+a last name and a country, it returns a low, medium or high risk with the source of every finding.
+It does not check sanctions or PEP lists, and does not query commercial adverse-media databases.
 
-Built with Next.js (App Router) and the Anthropic TypeScript SDK, without an agent framework.
-The agent lives in `src/agent/` and is called by the app as a plain function; nothing under
-`src/agent/` depends on Next.js.
+## How it was built
 
-## Setup
+Built in two days with Claude Code as a coding assistant, under the rules of a project file.
+The design, every decision, the prompt, the reviews and the measurements are the author's.
+Fifty-one decisions are recorded with their context and measurements in `docs/decisions.md`.
 
-Requires Node.js 24 and npm.
+## Key choices
+
+1. A workflow in plain TypeScript, not an agent framework (D-01).
+2. The risk is computed in code by a fixed grid, never by the model (D-04).
+3. A finding URL must be one of the search results (D-13).
+4. One query per language, with the name bound to each clause (D-39).
+5. The web search tool is called directly, which keeps zero data retention possible (D-17).
+6. A second search turn under an alias is decided in code (D-42).
+7. A canary detects a leaked prompt; sites without editorial control are filtered in code (D-36, D-37).
+8. Escalation to a stronger model is built and off by default (D-49).
+9. Sonnet 5.5 was measured against Opus 5.5 and kept (D-09).
+10. Every change is replayed on fixed cases, with usage and cost logged per run (D-24, D-27).
+
+## Results
+
+- 17/17 cases pass: fourteen public figures, two namesake cases, one fictional name.
+- The model's own level is recorded beside the grid: it differed on 2 of 17 cases, always lower (D-51).
+- Cost per screening: $0.134 in v1; now $0.072 on the same five cases, $0.086 on all seventeen.
+- Kept: one query per language (−37%), prompt caching (−15%), medium effort (−18%), the alias turn.
+- Rejected: dynamic filtering (+14%), page reads by the model, search operators, two queries per language, Opus by default (+105%). See `docs/evaluation.md`.
+
+## Quick start
+
+Requires Node.js 24, npm, a Claude API key and a Postgres database. `screen` and `evaluate` call the
+Claude API and cost money.
 
 ```
 npm install
-cp .env.example .env.local
+cp .env.example .env.local            # fill it, see the variables below
+npm run db:migrate                    # once, through DATABASE_URL_UNPOOLED
+npm run dev                           # http://localhost:3000, password APP_PASSWORD
+npm run screen -- Bernard Madoff US   # one screening, printed as JSON
+npm run evaluate                      # the five fixed cases, with a table of results
 ```
 
-| Variable                | Used by                                  | Purpose                                                                                           |
-| ----------------------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| `ANTHROPIC_API_KEY`     | the agent, server side                   | Claude API key                                                                                    |
-| `APP_PASSWORD`          | every page and API route                 | Shared password of the HTTP Basic prompt; without it, every request gets a 500                    |
-| `LOG_PSEUDONYM_KEY`     | `screen`, `evaluate`, `POST /api/screen` | Key of the HMAC that replaces names in `logs/runs.jsonl`; without it, the route writes no run log |
-| `CRON_SECRET`           | `GET /api/cron/daily`                    | Secret that Vercel Cron sends as `Authorization: Bearer`; at least 16 random characters           |
-| `DATABASE_URL`          | the app                                  | Neon connection string, pooled                                                                    |
-| `DATABASE_URL_UNPOOLED` | `db:migrate`                             | Neon connection string, direct, for migrations                                                    |
-| `QUERIES_PER_LANGUAGE`  | measurements only                        | `2` replays the v1 search plan, two queries per language; default `1`                             |
-| `EFFORT`                | measurements only                        | `high` replays the v1 effort; default `medium`                                                    |
-| `MODEL`                 | measurements only                        | `claude-opus-5-5` replays the fixtures on Opus 5.5 (D-09); default `claude-sonnet-5-5`            |
+## Environment variables
 
-Generate `LOG_PSEUDONYM_KEY` with:
+| Variable                | Role                                                             | Default                                                 |
+| ----------------------- | ---------------------------------------------------------------- | ------------------------------------------------------- |
+| `ANTHROPIC_API_KEY`     | Claude API key, read in server code only                         | required                                                |
+| `APP_PASSWORD`          | Shared password of the HTTP Basic prompt on every page and route | required; unset, every request gets a 500               |
+| `CRON_SECRET`           | Bearer secret that Vercel Cron sends to `GET /api/cron/daily`    | required for the daily run                              |
+| `DATABASE_URL`          | Neon connection string, pooled, used by the app                  | required to store screenings                            |
+| `DATABASE_URL_UNPOOLED` | Neon connection string, direct, used by `npm run db:migrate`     | required for migrations                                 |
+| `LOG_PSEUDONYM_KEY`     | Key of the HMAC that replaces names in `logs/runs.jsonl`         | required by the scripts; unset, the route writes no log |
+| `MAX_DAILY_SCREENINGS`  | Most screenings one daily run starts                             | `20`                                                    |
 
-```
-node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"
-```
+Measurement switches, read in `src/agent/config.ts`:
 
-Generate `APP_PASSWORD` the same way, and set it in `.env.local` and in the Vercel project.
+| Variable               | Role                                              | Default              |
+| ---------------------- | ------------------------------------------------- | -------------------- |
+| `QUERIES_PER_LANGUAGE` | `2` replays the v1 search plan                    | `1`                  |
+| `EFFORT`               | `high` replays the v1 effort                      | `medium`             |
+| `MODEL`                | Model of the screening                            | `claude-sonnet-5-5`  |
+| `ESCALATION_MODEL`     | Model of a second screening after a signal (D-49) | unset: no escalation |
 
-### Signing in
-
-The whole site, pages and API routes, asks for HTTP Basic credentials. The browser shows its
-login dialog: any user name, and `APP_PASSWORD` as the password. From the command line:
-
-```
-curl -u analyst:$APP_PASSWORD -H "content-type: application/json" \
-  -d '{"firstName":"Bernard","lastName":"Madoff","country":"US"}' http://localhost:3000/api/screen
-```
-
-Vercel Cron calls `GET /api/cron/daily` with `Authorization: Bearer $CRON_SECRET` instead.
+Generate secrets with `node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"`.
+Leave `ANTHROPIC_LOG` unset: at `debug`, the SDK logs request bodies, names included.
 
 ## Scripts
 
-| Command                            | What it does                                                         |
-| ---------------------------------- | -------------------------------------------------------------------- |
-| `npm run dev`                      | Next.js dev server                                                   |
-| `npm run lint`                     | ESLint                                                               |
-| `npm run typecheck`                | `tsc --noEmit`                                                       |
-| `npm run test`                     | Vitest, unit tests of the pure logic                                 |
-| `npm run format`                   | Prettier                                                             |
-| `npm run screen -- Jean Martin FR` | One screening, printed as JSON and logged                            |
-| `npm run evaluate`                 | Replays `fixtures/test-cases.json` and prints the comparison table   |
-| `npm run evaluate -- --extended`   | Replays `fixtures/extended-cases.json`, the wider validation set     |
-| `npm run db:generate`              | Writes a SQL migration in `drizzle/` from `src/db/schema.ts`         |
-| `npm run db:migrate`               | Applies the migrations of `drizzle/` through `DATABASE_URL_UNPOOLED` |
+- `npm run dev`, `npm run build`: Next.js dev server, production build.
+- `npm run lint`, `npm run typecheck`, `npm run format`: ESLint, `tsc --noEmit`, Prettier.
+- `npm run test`: Vitest, unit tests of the deterministic steps, no network.
+- `npm run screen -- <first> <last> <country>`: one screening; `npm run evaluate`: the five fixed
+  cases, or with `-- --extended` the twelve others.
+- `npm run db:generate`, `npm run db:migrate`: write a migration from `src/db/schema.ts`, apply them.
 
-`screen` and `evaluate` call the Claude API and cost money. They run with
-`tsx --conditions=react-server`, the resolution condition of the Next.js server bundle, so that
-the agent's `server-only` guard lets them through (D-16).
+## Deployment
 
-The database is a Neon Postgres created from the Vercel Marketplace, which sets both connection
-strings. After `npm run db:migrate`, every screening run from the page is stored, and `/history`
-lists them. A database that does not answer fails the record, not the screening.
+1. Create a Vercel project from the repository, framework preset Next.js.
+2. Add a Neon database from the Vercel Marketplace; it sets both connection strings.
+3. Set `ANTHROPIC_API_KEY`, `APP_PASSWORD`, `CRON_SECRET` and, if needed, `MAX_DAILY_SCREENINGS`.
+4. Run `npm run db:migrate` once against that database, then deploy.
 
-## Daily cron
+`vercel.json` runs the cron at 05:00 UTC, once a day without retry on the Hobby plan, with
+`Authorization: Bearer $CRON_SECRET`. Pages and routes ask for any user name and `APP_PASSWORD`.
 
-`vercel.json` schedules `GET /api/cron/daily` once a day at 05:00 UTC. The route re-screens every
-monitored person of the watchlist and stores a screening of kind `daily` that keeps only the findings whose
-URL is new for that person; `/history` marks these screenings and shows their new findings. It
-answers with a JSON summary: persons screened, new findings per person, total cost, and the
-persons skipped or not reached.
-
-- **Idempotent within a UTC day.** A person already screened by a daily run that day is skipped,
-  and a unique index refuses a second daily screening even when two calls run at once. A second
-  call the same day stores nothing and says so in its summary. Two calls at the very same time
-  both pay for their screenings; only one is stored.
-- **Bounded by the function duration.** A screening may take up to 240 s and the function stops
-  at 300 s, so new screenings start during the first 45 s only, four at a time: about 15 to 20
-  persons per run at the usual 10 s per screening. The others come first the next day.
-- **Cost.** About $0.06 per person and per day, at the measured mean.
-- **Hobby plan limits.** Once a day at most; the call lands anywhere within the scheduled hour;
-  a failed run is not retried, and delivery is best effort, so a day can be missed or delivered
-  twice. The next run catches up, and the daily check absorbs a duplicate.
-
-The proxy lets the cron through with its bearer secret, and the route checks it again: an
-analyst signed in with the password cannot start the run. Vercel Cron does not run locally; call
-the route by hand, which runs real screenings and costs money:
+## Repository layout
 
 ```
-curl -H "Authorization: Bearer $CRON_SECRET" http://localhost:3000/api/cron/daily
+src/agent/        the screening agent, independent of Next.js
+  index.ts        screenIndividual: prepare, search, alias turn, score, report
+  prepare.ts      languages, name variants, queries
+  search.ts       the model call, result collection, source checks
+  score.ts        the risk grid
+  data/           country languages, negative keywords, blocked domains
+src/app/          pages (screening, /history, /watchlist) and API routes
+src/db/           Drizzle schema and queries: persons, screenings, findings
+src/proxy.ts      HTTP Basic access and the cron bearer
+drizzle/          SQL migrations
+scripts/          screen.ts and evaluate.ts
+fixtures/         five fixed cases and twelve extended cases
+docs/             architecture, decisions, evaluation, security
 ```
 
-## Watchlist
+## Documentation
 
-`/watchlist` lists every recorded person: monitoring on or off, and the date, risk and new
-findings of their latest daily screening, with a link to their history. A button per row switches
-monitoring on or off (`PATCH /api/watchlist/[id]` with `{"monitored": false}`), and the form at
-the top enrolls a person without screening them now (`POST /api/watchlist`, the same validation
-as `/api/screen`); the next daily run screens them. Monitoring is off by default: a screening
-from the home page is one-shot, unless the analyst ticks **Add to daily monitoring**, which enrolls
-the person through the same route once the screening has succeeded. Screening an enrolled person
-again leaves their monitoring as it is.
-Each monitored person costs about $0.06 a day.
+- [`SPEC.md`](SPEC.md): the one-page specification.
+- [`docs/architecture.md`](docs/architecture.md): deployment, state graph, interfaces, data model, target, next steps.
+- [`docs/decisions.md`](docs/decisions.md): fifty-one decisions with their alternatives and measurements.
+- [`docs/evaluation.md`](docs/evaluation.md): method, cases, results by version, measured dials.
+- [`docs/security.md`](docs/security.md): threat model, defense layers, measures in place and in the target.
 
-## Layout
+## Test data
 
-```
-src/agent/      the screening agent (prepare -> search -> judge -> score)
-src/app/        Next.js pages (screening, /history, /watchlist) and the API routes
-src/db/         Drizzle schema and queries: persons, screenings, findings
-drizzle/        SQL migrations, generated and committed
-scripts/        CLI entry points (single screening, evaluation on the fixed cases)
-fixtures/       the test cases replayed after every change
-docs/           architecture, decision log, security model, evaluation
-logs/           run logs (gitignored)
-```
+The fixtures name only public figures whose cases were decided in public hearings and widely
+reported, two namesake cases, and one fictional name. No private individual is
+screened, and full results stay in the gitignored `logs/`.

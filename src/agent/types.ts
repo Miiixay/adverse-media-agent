@@ -63,6 +63,7 @@ export const STATUSES = [
   "unclear",
 ] as const;
 export const CONFIDENCE_LEVELS = ["high", "medium", "low"] as const;
+export const RISK_LEVELS = ["low", "medium", "high"] as const;
 export const SOURCE_RELIABILITIES = [
   "official",
   "national_press",
@@ -83,13 +84,11 @@ export type Status = (typeof STATUSES)[number];
 export type Confidence = (typeof CONFIDENCE_LEVELS)[number];
 export type SourceReliability = (typeof SOURCE_RELIABILITIES)[number];
 export type Subject = (typeof SUBJECTS)[number];
-export type RiskLevel = "low" | "medium" | "high";
+export type RiskLevel = (typeof RISK_LEVELS)[number];
 
 export type RawArticle = {
   url: string;
   title: string;
-  // Relative "last updated" text from the search engine, such as "221 days ago"; not a date.
-  pageAge: string | null;
 };
 
 export type Finding = {
@@ -136,6 +135,9 @@ export type CoverageErrorCode =
   | "unexpected_stop_reason"
   | "invalid_output";
 
+// What, in a first screening, sends the person to a second screening on another model (D-49).
+export type EscalationSignal = "counted_finding" | "alias" | "unsourced_summary" | "incomplete";
+
 export type CoverageError = {
   code: CoverageErrorCode;
   detail: string;
@@ -153,6 +155,8 @@ export type TokenUsage = {
 export type SearchOutcome = {
   // null when the turn produced no usable assessment; the reason is in errors.
   summary: string | null;
+  // The model's own view of the overall risk, which the score does not read (D-51).
+  suggestedRisk: RiskLevel | null;
   findings: AssessedFinding[];
   // Findings dropped because their URL was not among the search results.
   rejectedUrls: string[];
@@ -174,6 +178,11 @@ export type ScreeningResult = {
   status: ScreeningStatus;
   risk: RiskLevel;
   confidence: Confidence;
+  // The model's own view of the risk, recorded as an opinion: the grid decides (D-51). null without
+  // a usable or trusted assessment.
+  modelSuggestedRisk: RiskLevel | null;
+  // true when that view differs from the computed risk.
+  riskDisagreement: boolean;
   summary: string | null;
   findings: Finding[];
   coverage: {
@@ -191,8 +200,14 @@ export type ScreeningResult = {
     urlsReviewed: string[];
     rejectedUrls: string[];
     errors: CoverageError[];
+    // The model of a second, complete screening that replaced the first after a signal (D-49).
+    escalatedTo: string | null;
+    // The signals the first screening showed: those that escalated it, or that would have. They are
+    // kept with escalation off too, to measure how many screenings it would send on (D-49).
+    escalationSignals: EscalationSignal[];
   };
-  // apiCalls: 2 when the person was searched again under an alias (D-42).
+  // apiCalls counts every turn: a second one under an alias (D-42), those of an escalated screening
+  // (D-49).
   usage: TokenUsage & { estimatedCostUsd: number; apiCalls: number };
   model: string;
   promptVersion: string;

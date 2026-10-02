@@ -37,7 +37,11 @@ export function screeningRows(
       summary: result.summary,
       model: result.model,
       promptVersion: result.promptVersion,
-      coverageJson: result.coverage,
+      coverageJson: {
+        ...result.coverage,
+        modelSuggestedRisk: result.modelSuggestedRisk,
+        riskDisagreement: result.riskDisagreement,
+      },
       usageJson: result.usage,
       costUsd: result.usage.estimatedCostUsd,
       durationMs: result.durationMs,
@@ -92,14 +96,27 @@ export function resultFromRows(
     countedInScore: row.riskLevel !== null,
     riskLevel: row.riskLevel,
   }));
+  // Screenings stored before D-51 carry no opinion of the model.
+  const {
+    modelSuggestedRisk = null,
+    riskDisagreement = false,
+    ...coverage
+  } = screening.coverageJson;
   return {
     status: screening.status,
     risk: screening.risk,
     confidence: screening.confidence,
+    modelSuggestedRisk,
+    riskDisagreement,
     summary: screening.summary,
     findings: resultFindings.toSorted((a, b) => rank(a) - rank(b)),
-    // Screenings stored before D-44 have no aliases.
-    coverage: { ...screening.coverageJson, aliases: screening.coverageJson.aliases ?? [] },
+    // Screenings stored before D-44 have no aliases, before D-49 no escalation.
+    coverage: {
+      ...coverage,
+      aliases: coverage.aliases ?? [],
+      escalatedTo: coverage.escalatedTo ?? null,
+      escalationSignals: coverage.escalationSignals ?? [],
+    },
     // Screenings stored before D-42 made a single call.
     usage: { ...screening.usageJson, apiCalls: screening.usageJson.apiCalls ?? 1 },
     model: screening.model,

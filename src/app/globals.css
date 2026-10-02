@@ -163,6 +163,42 @@ a {
   padding: 6px 14px;
 }
 
+.verdict-label {
+  margin: 10px 0 0;
+  font-weight: 600;
+}
+
+.model-opinion {
+  margin: 6px 0 0;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.disagreement {
+  color: #7d4e00;
+}
+
+.levels {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 6px 12px;
+  align-items: baseline;
+  margin: 12px 0 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.levels dt,
+.levels dd {
+  margin: 0;
+}
+
+@media (max-width: 600px) {
+  .levels {
+    grid-template-columns: 1fr;
+  }
+}
+
 .risk-low {
   background: var(--low);
 }

@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-import { findingLevel, isCorroborated, isCoverageComplete, score, untrustedScore } from "../score";
+import {
+  disagrees,
+  findingLevel,
+  higherRisk,
+  isCorroborated,
+  isCoverageComplete,
+  score,
+  untrustedScore,
+} from "../score";
 import type { AssessedFinding } from "../types";
 
 const SCREENED_AT = new Date("2026-10-01T00:00:00Z");
@@ -211,6 +219,58 @@ describe("level per finding", () => {
       ["https://corsematin.com/a", null],
       ["https://homonym.fr/a", null],
     ]);
+  });
+});
+
+describe("the model's own view of the risk", () => {
+  it("disagrees only when the model gave a level and it differs from the computed one", () => {
+    expect(disagrees("low", "medium")).toBe(true);
+    expect(disagrees("high", "high")).toBe(false);
+    expect(disagrees("low", null)).toBe(false);
+  });
+
+  it("keeps the higher of two views, or the only one", () => {
+    expect(higherRisk("medium", "high")).toBe("high");
+    expect(higherRisk("low", null)).toBe("low");
+    expect(higherRisk(null, null)).toBeNull();
+  });
+});
+
+describe("blog and social sources", () => {
+  it("never counts a finding whose best source is a blog or a social network, even critical", () => {
+    const result = score(
+      [
+        finding({ sourceReliability: "blog", status: "conviction" }),
+        finding({ url: "https://social.example/post", sourceReliability: "social" }),
+      ],
+      true,
+      SCREENED_AT,
+    );
+
+    expect(result.risk).toBe("low");
+    expect(result.findings.map((item) => [item.countedInScore, item.riskLevel])).toEqual([
+      [false, null],
+      [false, null],
+    ]);
+  });
+
+  it("does not let a blog lower the confidence of the person's own findings", () => {
+    const blog = finding({
+      url: "https://blog.example/post",
+      sourceReliability: "blog",
+      identityConfidence: "medium",
+    });
+
+    expect(score([finding(), blog], true, SCREENED_AT)).toMatchObject({
+      risk: "high",
+      confidence: "high",
+    });
+  });
+
+  it("leaves the confidence at medium when only a blog reports a critical matter", () => {
+    expect(score([finding({ sourceReliability: "blog" })], true, SCREENED_AT).confidence).toBe(
+      "medium",
+    );
   });
 });
 

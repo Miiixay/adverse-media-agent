@@ -30,8 +30,9 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
+# env files; the example file documents the required variables
 .env*
+!.env.example
 
 # vercel
 .vercel
@@ -40,16 +41,8 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# working files, not part of the deliverable
-/CLAUDE.md
-/PLAN.md
-/PROMPTS-CLAUDE-CODE.md
-/AGENTS.md
-
-# run logs (may contain personal data)
+# run logs, which may contain personal data
 /logs
 
-# the example env file is the documentation of the required variables
-!.env.example
-review.zip
-gitlog.txt
+# local archives
+*.zip

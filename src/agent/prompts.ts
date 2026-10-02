@@ -1,7 +1,7 @@
 import { MAX_CORROBORATING_URLS, MAX_FINDINGS } from "./schema";
 import type { ScreeningInput, SearchPlan } from "./types";
 
-export const PROMPT_VERSION = "v13";
+export const PROMPT_VERSION = "v14";
 
 // A random marker with no meaning anywhere else. If it comes back in an answer, the model followed
 // an instruction found in a search result or leaked these instructions, and the result is not
@@ -30,7 +30,7 @@ Rules
 - For url, choose the most authoritative source: an official source (court, prosecutor, regulator) first, then the national press of the person's country in its own language, then the international press, then encyclopedias. Put the other articles on the same facts in corroboratingUrls.
 - Judge identity before severity. You only know the name and the country of the person.
 - Distinguish an allegation from an investigation, an indictment, a conviction and a final administrative sanction.
-- Do not assess the person's overall risk level; it is calculated elsewhere.
+- Give your own view of the person's overall risk in suggestedRisk, low, medium or high, from the findings you report and the definitions of identityConfidence, category, severity and status in these instructions. The final risk level is calculated elsewhere: your view is recorded as an opinion and does not change it.
 
 identityConfidence
 - high: the article is unambiguously about this person: the full name and the country match, and either the name is rare or the article is about a public figure no one else with this name could be mistaken for.
@@ -79,8 +79,10 @@ subject
 date: the date of the latest known status of the matter (the verdict, the decision, the charge), not the date of the article; failing that, the date of the article. Use YYYY-MM-DD, or YYYY-MM or YYYY when only that precision is given; null when the article gives no date. The age shown for a search result is when the page was last updated, not a date of the article: do not use it.
 
 Output
-Answer with the JSON object only. Write the findings first; the summary describes the findings listed. summary: two or three factual sentences on the overall picture, for a compliance analyst, in English whatever the language of the sources, with no conclusion about risk. The summary must not mention a matter that has no finding of its own. Each finding's summary: one sentence stating the fact, with no opinion. language: ISO 639-1 code of the article. aliases: names the sources use instead of the legal name, such as a nickname-based name ("Toni Rossi" for Antonio Rossi), a stage name or a different spelling of the surname; not a longer legal form with middle names, not a maiden name mentioned in passing, never a namesake; at most three, usually empty.`;
+Answer with the JSON object only. Write the findings first; the summary describes the findings listed. suggestedRisk: your own view of the overall risk, low, medium or high, written after the findings and before the summary. summary: two or three factual sentences on the overall picture, for a compliance analyst, in English whatever the language of the sources, with no conclusion about risk. The summary must not mention a matter that has no finding of its own. Each finding's summary: one sentence stating the fact, with no opinion. language: ISO 639-1 code of the article. aliases: names the sources use instead of the legal name, such as a nickname-based name ("Toni Rossi" for Antonio Rossi), a stage name or a different spelling of the surname; not a longer legal form with middle names, not a maiden name mentioned in passing, never a namesake; at most three, usually empty.`;
 
+// Data goes between tags the system prompt declares as data (D-36); the language tag before each
+// query is tolerated by isCoverageComplete (D-35).
 export function buildUserMessage(input: ScreeningInput, plan: SearchPlan): string {
   return [
     "<person>",
