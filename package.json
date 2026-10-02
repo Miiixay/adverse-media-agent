@@ -12,10 +12,14 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "screen": "tsx --conditions=react-server --env-file-if-exists=.env.local scripts/screen.ts",
-    "evaluate": "tsx --conditions=react-server --env-file-if-exists=.env.local scripts/evaluate.ts"
+    "evaluate": "tsx --conditions=react-server --env-file-if-exists=.env.local scripts/evaluate.ts",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "node --env-file-if-exists=.env.local node_modules/drizzle-kit/bin.cjs migrate"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "0.130.0",
+    "@neondatabase/serverless": "1.1.0",
+    "drizzle-orm": "0.45.3",
     "next": "16.3.8",
     "react": "19.2.8",
     "react-dom": "19.2.8",
@@ -26,6 +30,7 @@
     "@types/node": "24.19.0",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "drizzle-kit": "0.31.11",
     "eslint": "^9",
     "eslint-config-next": "16.3.8",
     "eslint-config-prettier": "10.1.8",

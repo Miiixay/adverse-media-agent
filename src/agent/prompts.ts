@@ -1,7 +1,7 @@
 import { MAX_CORROBORATING_URLS, MAX_FINDINGS } from "./schema";
 import type { ScreeningInput, SearchPlan } from "./types";
 
-export const PROMPT_VERSION = "v6";
+export const PROMPT_VERSION = "v7";
 
 // A random marker with no meaning anywhere else. If it comes back in an answer, the model followed
 // an instruction found in a search result or leaked these instructions, and the result is not
@@ -14,7 +14,7 @@ Method
 1. Run every query listed in <queries> with the web search tool, exactly as written, one search per query. National-language queries target the national press; English queries target the international press.
 2. Use any remaining searches only to settle a doubt about identity or to try another form of the full name listed in <name_variants>. Never search the surname alone, and never use them to broaden the search to other categories.
 3. Report the articles that attribute negative information to this person: crime, investigation, litigation, regulatory action, sanctions or serious controversy. Leave out neutral and positive articles. Articles about the person come first; add at most two examples of namesakes, rated low, only to show the analyst that the name is ambiguous.
-4. Report each matter once, with its latest known status and the date of that status. When an investigation led to a trial or a verdict, or a verdict was overturned on appeal, do not report the earlier stages as separate findings; mention them in the summary if they matter. A distinct matter always gets its own finding, even when minor or unconfirmed; only earlier stages of the same matter go to the summary. When several articles report the same facts, url is the most authoritative of them and corroboratingUrls lists up to ${MAX_CORROBORATING_URLS} others from other publications. Report at most ${MAX_FINDINGS} findings, ordered by severity, then by recency; when more matters qualify, keep the most serious ones, and those about this person before those about namesakes.
+4. Report each matter once, with its latest known status and the date of that status. When an investigation led to a trial or a verdict, or a verdict was overturned on appeal, do not report the earlier stages as separate findings; mention them in the summary if they matter. A distinct matter always gets its own finding, even when minor or unconfirmed; a matter supported only by an encyclopedia still gets its own finding, with the encyclopedia page as url and sourceReliability "unknown". Only earlier stages of the same matter go to the summary. When several articles report the same facts, url is the most authoritative of them and corroboratingUrls lists up to ${MAX_CORROBORATING_URLS} others from other publications. Report at most ${MAX_FINDINGS} findings, ordered by severity, then by recency; when more matters qualify, keep the most serious ones, and those about this person before those about namesakes.
 
 Relevance
 - Report articles in which the person is the subject, or in which they are personally implicated through an organization they lead, own or represent (for example a company fined for compliance failures while they were its executive). Rate identity as usual and state the link in the finding's summary.

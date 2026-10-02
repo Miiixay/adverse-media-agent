@@ -1,0 +1,1 @@
+ALTER TABLE "persons" ADD COLUMN "monitored" boolean DEFAULT true NOT NULL;

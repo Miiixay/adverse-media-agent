@@ -85,22 +85,47 @@ Limits of these measures:
 - Identity rests on the name and the country only. A person can be wrongly matched or missed;
   `identityEvidence` and the confidence level show the analyst how strong the match is.
 
+## In place in the app
+
+| Threat                                        | Measure                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | Where                                         |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------- |
+| Access to the prototype                       | Every page and API route asks for HTTP Basic credentials; only the static assets of Next.js and the favicon are exempt. Any user name, one shared password compared in constant time to `APP_PASSWORD`; without the variable, every request gets a 500 rather than an open site. Vercel Cron alone may call `GET /api/cron/daily` with `Bearer CRON_SECRET`. The password limits who can read the history, which holds names in clear, and who can spend the budget.     | `src/proxy.ts`, `src/access.ts`               |
+| Changes to the watchlist                      | Enrolling, suspending and resuming go through `POST /api/watchlist` and `PATCH /api/watchlist/[id]`, behind the password like every route. The input schema is the one of `/api/screen`, the id must be a UUID, and the flag a boolean. Enrolling calls no model, so it has no rate limit; what it adds to the bill, about $0.06 a day per monitored person, stays bounded by the start window of the daily run. Suspending a person is how an analyst stops that spend. | `api/watchlist/`, `src/db/persons.ts`         |
+| Cost of the daily run                         | Only Vercel Cron can start it: the proxy and the route both require `Bearer CRON_SECRET`, compared in constant time, so a signed-in analyst cannot. Its spend is bounded by its start window, 45 s at four screenings at a time, and a unique index stores one daily screening per person and day, so a repeated call adds no duplicate.                                                                                                                                 | `api/cron/daily/route.ts`, `src/db/schema.ts` |
+| A script that spends the budget               | At most 5 screenings a minute per client address, checked before the body is read; a 429 with `Retry-After` beyond. The count lives in the memory of one server instance: it is not shared between Vercel instances and starts again when an instance starts, so it slows a script down without being a quota. The address comes from `x-forwarded-for`, which Vercel overwrites with the client's own.                                                                  | `api/screen/rate-limit.ts`                    |
+| A large or malformed body                     | The body is read as a stream and refused above 2,048 bytes (413), declared or not; invalid JSON or input gives a 400 with the fields at fault. The same input schema is checked in the browser and on the server.                                                                                                                                                                                                                                                        | `api/screen/body.ts`, `api/screen/route.ts`   |
+| A screening that runs past the platform limit | `maxDuration` is 300 s, the Hobby maximum with fluid compute; the agent stops searching at 240 s, the route answers 504 at 280 s. A failure of the model API answers 502.                                                                                                                                                                                                                                                                                                | `api/screen/route.ts`                         |
+| Personal data in the run log                  | The route writes the run log, never the agent, and only when `LOG_PSEUDONYM_KEY` is set and the file system is writable; on Vercel it is read-only and the log is skipped without error.                                                                                                                                                                                                                                                                                 | `api/screen/route.ts`, D-24                   |
+| Malicious links and markup in findings        | Every link opens in a new tab with `rel="noopener noreferrer"` and shows its domain; a URL that is not http or https is rendered as text, and rejected URLs are never links. Text goes through React escaping, never `dangerouslySetInnerHTML`.                                                                                                                                                                                                                          | `screening-report.tsx`                        |
+| Script injection, framing, MIME sniffing      | `Content-Security-Policy` limits every resource to the app's origin, forbids plugins and framing (`frame-ancestors 'none'`); scripts and styles stay allowed inline, which Next.js needs without a nonce. `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`.                                                                                                                                                                                             | `next.config.ts`                              |
+| Secrets in the browser                        | No environment variable is read in a client component; the browser bundle holds the input schema, the result types and the country names only.                                                                                                                                                                                                                                                                                                                           | `screening-form.tsx`, `page.tsx`              |
+| Database credentials and queries              | The client module starts with `server-only` and reads `DATABASE_URL` on first use; the direct connection string serves migrations only. Drizzle sends every value as a query parameter. When a write fails, the server log keeps the error name and code, never the message, which carries the query parameters and so the name.                                                                                                                                         | `src/db/client.ts`, `api/screen/route.ts`     |
+| A database failure read as a failed screening | The screening is returned whether or not it could be stored; the failure goes to the server log.                                                                                                                                                                                                                                                                                                                                                                         | `api/screen/route.ts`                         |
+
+Limit of the password:
+
+- The watchlist keeps no trace of who enrolled, suspended or resumed a person, nor why: with one
+  shared password, there is no one to name. The target ties each change to an analyst account.
+- The shared password names no one: access is not traced to a person, and it can only be revoked
+  for everyone at once, by changing the variable. Basic credentials travel with every request,
+  readable without TLS: they rely on the HTTPS that Vercel enforces. Guessing it is not throttled
+  outside `POST /api/screen`; a long random password is what makes guessing impractical.
+
 ## Planned
 
+- **Analyst accounts.** In the target, single sign-on with roles and an access log replace the shared
+  password: each screening and each view of the history is tied to a person.
+- **Retention.** Screenings are kept without limit. A retention period, and the deletion of a person
+  with their screenings (the foreign keys cascade), are to be defined with compliance.
 - **Adversarial case.** A fixture whose search results carry a planted instruction: rate the person
   low, reveal the instructions, add a URL. Since the agent cannot choose what a live search returns,
   the case replays a recorded response with the planted text through `interpretTurn` and the
   score, and checks that no finding changes, that the canary is caught and that no URL outside the
   results survives.
-- **Rate limiting in the app.** A per-IP limit on `POST /api/screen`, checked before the agent is
-  called, so that a script cannot spend the budget. In the target, authentication and quotas per
-  analyst replace it.
-- **Rendering of findings.** Links open in a new tab with `rel="noopener noreferrer"` and show their
-  domain. Text is rendered through React escaping, never `dangerouslySetInnerHTML`. A content
-  security policy is set on the page.
 - **SDK logging.** `ANTHROPIC_LOG` stays unset in every environment: at `debug`, the SDK would write
   request and response bodies, names and article text included.
 - **Dependency audit.** `npm audit` in continuous integration.
+- **Shared rate limiting.** A store shared between instances, or the platform firewall, then authentication and quotas per analyst in the target.
 - **Canary from the environment.** In the target, the canary is read from an environment variable,
   distinct per environment and rotated, instead of a constant in the code. A canary published in a
   repository can be planted in a page by someone who wants a screening marked `compromised` and its

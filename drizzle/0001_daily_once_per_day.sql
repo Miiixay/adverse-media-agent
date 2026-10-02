@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "screenings_one_daily_per_day" ON "screenings" USING btree ("person_id",(("created_at" at time zone 'UTC')::date)) WHERE "screenings"."kind" = 'daily';
