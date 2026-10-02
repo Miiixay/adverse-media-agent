@@ -1,0 +1,41 @@
+[
+  {
+    "id": "known-high",
+    "input": {
+      "firstName": "Bernard",
+      "lastName": "Madoff",
+      "country": "US"
+    },
+    "expected": {
+      "risk": "high"
+    },
+    "rationale": "Public figure with a documented conviction (Ponzi scheme, 2009). Checks that critical categories and a conviction at high identity confidence produce high."
+  },
+  {
+    "id": "homonym",
+    "input": {
+      "firstName": "David",
+      "lastName": "Smith",
+      "country": "GB"
+    },
+    "expected": {
+      "risk": "low",
+      "countedFindings": 0,
+      "minLowIdentityFindings": 1
+    },
+    "rationale": "One of the most common full names in Britain, where open justice puts defendants names in court reports. Namesakes with convictions are expected: at least one finding must come back at identity confidence low, none counted, with evidence saying why. Replaces Jean Martin, FR: French judicial reporting rarely names ordinary defendants in full, and 36 articles brought no namesake hit on 2026-10-01."
+  },
+  {
+    "id": "clean",
+    "input": {
+      "firstName": "Friederike",
+      "lastName": "Wenzlaff-Obermaier",
+      "country": "DE"
+    },
+    "expected": {
+      "risk": "low",
+      "countedFindings": 0
+    },
+    "rationale": "Fictional, uncommon name with no press coverage. Checks the no-result path: risk low, complete coverage in de and en, no invented finding."
+  }
+]
